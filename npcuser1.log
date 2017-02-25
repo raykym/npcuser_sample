@@ -1,0 +1,268 @@
+
+<!DOCTYPE html>
+ <html lang="ja" manifest="./appcache.mani">
+  <head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Cache-Control" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>Walkworld</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="https://code.jquery.com/mobile/1.4.5/jquery.mobile-1.4.5.min.css" />
+  <script src="https://code.jquery.com/jquery-1.11.1.min.js"></script>
+  <script src="https://code.jquery.com/mobile/1.4.5/jquery.mobile-1.4.5.min.js"></script>
+<script src="https://code.jquery.com/ui/1.11.4/jquery-ui.js"></script>
+<script type="text/javascript" src="https://maps.google.com/maps/api/js?sensor=true_or_false"></script>
+  </head>
+  <body>
+  
+<script type="text/javascript">
+
+ gpslocal_pos = null;  //user gps object
+
+ map = null ;
+ mapoptions = null;
+ mapobj = null;
+ makerobj = new google.maps.Marker();
+ makerobjects = [];
+
+ isInterval = false;   // JAIROの稼働タイミング
+
+ gpssetID = null;
+ gpsInterval = 60000; // 60secで１回GPSをチェックする。
+
+ // checkuserのstashでサーバから送られる _はNPC用
+ username = "NPCuser1"; 
+ _username_ = "NPCuser1"; 
+ uid = "3fMs2l1FdIghx7cscnpD5Q"; 
+ _uid_ = "3fMs2l1FdIghx7cscnpD5Q"; 
+ iconurl = "";
+        if ( iconurl == "" ) {
+           var icon = "QXJDdUJEa0hUZTQ0c3Fjb2RtZXJrdw";
+               iconurl = "/imgcomm?oid=" + icon + "&resize=1";  
+           }
+
+
+// main?
+//$(function(){
+//    wsCall(dumCall);
+//    ws_stat = true;
+//  });
+    wsCall(dumCall);
+    ws_stat = true;
+
+
+function Mtoggle(){
+
+    if (MakerToggle) {
+        MakerToggle = false;
+    } else {
+        MakerToggle = true;
+    }
+}
+
+  // リセット
+function hangUp(){
+         window.location.reload();
+    }
+
+function dumCall(){
+       //dummy Callback...
+       }
+
+  // map描写
+        var lat = 0;
+        var lng = 0;
+        google.maps.event.addDomListener(window, 'load', function() {
+                    map = document.getElementById("gmap");
+                var options = {
+                        zoom: 16,
+                        center: new google.maps.LatLng(lat, lng),
+                        mapTypeId: google.maps.MapTypeId.ROADMAP,
+                        scaleControl: true
+                };
+                mapobj = new google.maps.Map(map, options);
+              });
+
+// JAIRO  定期ポーリングの場合に駆動する。
+function JairoSence(){
+if (isInterval){
+        window.addEventListener("deviceorientation", deviceorientationHandler);
+    } else {
+        window.removeEventListener("deviceorientation", deviceorientationHandler);
+        // console.log("DEBUG: JAIRO STOPED!");
+    }
+}
+
+function deviceorientationHandler(event) {
+
+      console.log("DEBUG: JAIRO START!!");
+
+   if (isMotion) return;
+
+  // X軸
+    $('#event_x').text(event.beta);
+  // Y軸
+    $('#event_y').text(event.gamma);
+  // Z軸
+     // trunsrate RightRound
+     N0r = 360 - event.alpha;
+    $('#event_z').text(N0r);
+
+    if ((N0r > alpha_shl-20) && ( N0r < alpha_shl+20 )) {
+            direct = true;
+        } else {
+            direct = false;
+        }
+
+    $('#output_j').text("alpha:(-360) " + Math.ceil(N0r) + dispSupport_j);
+}
+
+  // エネミー初期化 とりま、GPSチェック
+function enmset(){
+        gpssetID = window.setInterval(keyInput,gpsInterval);
+    };
+
+
+ // GPS get  aCallback is dummy callback for Promise
+function gpsset(aCallback){
+    if ( ! ws_stat) { wsCall(dumCall); } // 接続がなければ接続する。
+    getPosition(aCallback);
+    }
+
+
+function getPosition(aCallback){
+    console.log("getPosition START!!!");
+
+    var geoOptions = {
+        enableHighAccuracy: true,   //高精度要求
+        timeout: 6000,          //タイムアウト(ミリ秒)
+        maximumAge: 0       //キャッシュ有効期限(ミリ秒)
+    }
+    var watchID =  navigator.geolocation.watchPosition(successCallback, errorCallback,geoOptions);
+
+    function successCallback(position) {
+
+          // MAP表示センター指定
+          lat = position.coords.latitude;
+          lng = position.coords.longitude;
+
+          gpslocal_pos = {"gpslocation": {"latitude": position.coords.latitude,
+                                          "longitude": position.coords.longitude,
+                                          "altitude": position.coords.altitude,
+                                          "accuracy": position.coords.accuracy,
+                                          "altitudeAccuracy": position.coords.altitudeAccuracy,
+                                          "heading": position.coords.heading,
+                                          "speed": position.coords.speed
+                                        }};
+
+         // console.log("GPS:" + JSON.stringify(gpslocal_pos) );
+
+    var timerecord = Date.now();
+
+          user_stat = {   
+                       geometry: {
+                                  type : "Point",
+                                  coordinates : [ position.coords.longitude, position.coords.latitude ]
+                                  },
+                       loc : { lat : position.coords.latitude ,
+                               lng : position.coords.longitude
+                             },
+                       name : username,
+                       userid : uid,
+                       status : "dummy",
+                       time : timerecord,
+                       icon_url : iconurl,
+                      };
+
+          console.log("user_stat:" + JSON.stringify(user_stat) );
+          console.log("Send user_stat#######");
+
+          ws.send(JSON.stringify(user_stat));
+
+
+      // var bytesArray = new Uint8Array(user_stat);
+      //    ws.send(bytesArray.buffer);
+
+     // 再描写用 GPSの座標をセンターに再描写
+         var opt2 = { center: new google.maps.LatLng(lat, lng)};
+         mapobj.setOptions(opt2);
+
+     // 追跡の停止
+         navigator.geolocation.clearWatch(watchID);
+
+     // Marker Set
+         console.log("Marker SET");
+
+                  makerobj.setMap(null);
+
+                  makerobj = new google.maps.Marker({
+                               position: new google.maps.LatLng(position.coords.latitude, position.coords.longitude),
+                               map: mapobj,
+                               title: "mySelf"
+                          });
+                   console.log("Marker:" + position.coords.latitude + "|" + position.coords.longitude);
+          aCallback(); // for promise
+    }  // successCallback
+
+    function errorCallback(error) {
+      var err_msg = "";
+      switch(error.code)
+        {
+        case 1:
+          err_msg = "位置情報の利用が許可されていません";
+          break;
+        case 2:
+          err_msg = "デバイスの位置が判定できません";
+          break;
+        case 3:
+          err_msg = "タイムアウトしました";
+          break;
+      }
+      //  alert(err_msg);
+      console.log("DEBUG: " + err_msg);
+  ////////    wsCall(dumCAll);
+      return;
+     }
+
+}  //getPosition
+
+
+  // WebSocket
+function wsCall(aCallback){
+      ws = new WebSocket('wss://westwind.iobb.net/walkworld');
+      console.log("DEBUG: ws Connect!!");
+      $('#output').text("接続中");
+      aCallback();
+  } 
+
+    ws.onopen = function(){
+        console.log('Connection opened');
+    }
+
+    ws.onclose = function(){
+        console.log("Close: WebSocket Close");
+        ws_stat = false;
+        $('#output').text("切断中");
+   //     wsCall(dumCall);
+    }
+
+    ws.onerror = function(){
+       alert("please Reload, Reconnect websocket!");
+    }
+
+    ws.onmessage = function(msg){
+        var evt = JSON.parse(msg.data);
+            console.log("evt:" + JSON.stringify(evt.pointlist));
+
+            if ( evt == ""){ return; }
+
+        console.log("DEBUG: makerobjects: " + makerobjects.length);
+        // makerobjectsの初期化
+            while ( makerobjects.length > 0){
+                var mkobj = makerobjects.shift();
+                console.log("DEBUG: marker delete " + mkobj.title);
+                mkobj.setMap(null);
+                }
+
+        var plist = evt.pointlist;

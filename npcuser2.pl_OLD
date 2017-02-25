@@ -1,0 +1,164 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+use utf8;
+use feature 'say';
+use Mojo::UserAgent;
+use Mojo::JSON qw(encode_json decode_json from_json to_json);
+use DateTime;
+
+# npcuser2用モジュール
+
+my $ua = Mojo::UserAgent->new;
+my $cookie_jar = $ua->cookie_jar;
+   $ua = $ua->cookie_jar(Mojo::UserAgent::CookieJar->new);
+
+my $email = 'npcuser2@test.com';
+my $emailpass = 'npcuser2_pass';
+
+# Login認証
+my $tx = $ua->post('https://westwind.iobb.net/signinact' => form => { email => "$email", password => "$emailpass" });
+
+if (my $res = $tx->success){ say $res->body }
+   else {
+      my $err = $tx->error;
+      die "$err->{code} responce: $err->{message}" if $err->{code};
+      die "Connection error: $err->{message}";
+}
+
+# 認証を通ればページはパスできる事を確認
+  $tx = $ua->get('https://westwind.iobb.net/walkworld/view');
+if (my $res = $tx->success){ say $res->body }
+   else {
+      my $err = $tx->error;
+      die "$err->{code} responce: $err->{message}" if $err->{code};
+      die "Connection error: $err->{message}";
+}
+
+# 初期値
+my $lat = 35.677443;
+my $lng = 139.9056707;
+my $username = "npcuser2";
+my $userid = "0CSd2VtP+7aFaGpaLAB0mg";
+my $icon = "SFh0YkVoUE4waThyYmJySWZ1U01Vdw"; #url_safe
+my $timerecord;
+my $point_spn = 0.00015;
+my $direct_reng = 90;
+my $rundirect = int(rand(360));
+
+my $npcuser1_stat = { 
+         "geometry" => {
+                     "type" => "Point",
+                     "coordinates" => [ $lng , $lat ]
+                     },
+          "loc" => { "lat" => $lat,
+                     "lng" => $lng 
+                   },
+          "name" => $username,
+          "userid" => $userid,
+          "status" => "random",
+          "rundirect" => $rundirect,
+          "time" => $timerecord,
+          "icon_url" => "/imgcomm?oid=".$icon."&resize=1",
+           };
+
+# websocketでの位置情報送受信
+  $ua->websocket('wss://westwind.iobb.net/walkworld' => sub {
+    my ($ua,$tx) = @_;
+
+       # とりあえず1回送信しておく
+              $timerecord = DateTime->now()->epoch();
+              $timerecord = $timerecord * 1000; #ミリ秒に合わせるために
+              $npcuser1_stat->{time} = $timerecord;
+              $tx->send( { json => $npcuser1_stat } );
+    
+    $tx->on(finish => sub {
+       my ($tx, $code, $reason) = @_;
+       say "WebSocket closed with status $code.";
+       exit;
+    });
+
+    my $pointlist;
+
+    $tx->on(json => sub {
+        my ($tx,$hash) = @_;
+         say "webSocket responce! $email";
+            $pointlist = $hash->{pointlist};
+         while (my $linejson = shift(@$pointlist)) { 
+           my $i = to_json($linejson);
+           say "$i";
+         }
+     #    $tx->finish;
+        }); #on json
+
+       Mojo::IOLoop->recurring(
+          60 => sub {
+
+     # 移動処理をここに書く
+             my $rundirect = $npcuser1_stat->{rundirect};
+
+             # ランダム移動処理
+             if ( $npcuser1_stat->{status} eq "random" ){
+
+                my $runway_dir = 1;
+
+                if ($npcuser1_stat->{rundirect} < 90) { $runway_dir = 1; }
+                if (( 90 < $rundirect)&&( $rundirect < 180)) { $runway_dir = 2; }
+                if (( 180 < $rundirect)&&( $rundirect < 270 )) { $runway_dir = 3; }
+                if (( 270 < $rundirect)&&( $rundirect < 360 )) { $runway_dir = 4; }
+
+
+                if ($runway_dir == 1) {
+                          $lat = $lat + rand($point_spn);
+                          $lng = $lng + rand($point_spn);
+                          $rundirect = $rundirect + int(rand($direct_reng)) - int($direct_reng/2);
+                          if ($rundirect < 0 ) {
+                             $rundirect = $rundirect + 360;
+                             }
+                          }
+                if ($runway_dir == 2) {
+                          $lat = $lat - rand($point_spn);
+                          $lng = $lng + rand($point_spn);
+                          $rundirect = $rundirect + int(rand($direct_reng)) - int($direct_reng/2);
+                          }
+                if ($runway_dir == 3) {
+                          $lat = $lat - rand($point_spn);
+                          $lng = $lng - rand($point_spn);
+                          $rundirect = $rundirect + int(rand($direct_reng)) - int($direct_reng/2);
+                          }
+                if ($runway_dir == 4) {
+                          $lat = $lat + rand($point_spn);
+                          $lng = $lng - rand($point_spn);
+                          $rundirect = $rundirect + int(rand($direct_reng)) - int($direct_reng/2);
+                          if ($rundirect > 360 ) {
+                             $rundirect = $rundirect - 360;
+                             }
+                          }
+
+             } # if stat
+
+              $timerecord = DateTime->now()->epoch();
+              $timerecord = $timerecord * 1000; #ミリ秒に合わせるために
+              $npcuser1_stat->{time} = $timerecord;
+
+              $npcuser1_stat->{geometry}->{coordinates}= [ $lng, $lat ];
+              $npcuser1_stat->{loc}->{lat} = $lat;
+              $npcuser1_stat->{loc}->{lng} = $lng; 
+              $npcuser1_stat->{rundirect} = $rundirect;
+
+              $tx->send( { json => $npcuser1_stat } );
+          }); #ループ
+
+   #接続維持の為
+   Mojo::IOLoop->recurring(
+          10 => sub {
+            my $jsonobj = { "dummy" => "dummy" };
+               $tx->send( { json => $jsonobj });
+          });
+
+   }); # ua websocket
+
+
+   Mojo::IOLoop->start unless Mojo::IOLoop->is_running;
+
