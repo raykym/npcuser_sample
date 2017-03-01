@@ -33,9 +33,11 @@ my $redis ||= Mojo::Redis2->new(url => 'redis://dbs-1:6379');
 
 my $wwdb = $mongoclient->get_database('WalkWorld');
 my $timelinecoll = $wwdb->get_collection('MemberTimeLine');
+my $trapmemberlist = $wwdb->get_collection('trapmemberlist');
 
 my $wwlogdb = $mongoclient->get_database('WalkWorldLOG');
 my $timelinelog = $wwlogdb->get_collection('MemberTimeLinelog');
+my $membercount = $wwlogdb->get_collection('MemberCount');
 
 # WalkChat用
 my $holldb = $mongoclient->get_database('holl_tl');
@@ -278,9 +280,9 @@ my $oncerun = "true";
     foreach my $npcuser_stat (@$run_gacclist){
                   my $dt = DateTime->now( time_zone => 'Asia/Tokyo');
                   # TTLレコードを追加する。
-                  my $ttl = DateTime->now();
+             #     my $ttl = DateTime->now();
                   $username = $npcuser_stat->{name};
-                  $npcuser_stat->{ttl} = $ttl;
+                  $npcuser_stat->{ttl} = DateTime->now();
                   $timelinecoll->delete_many({"userid" => $npcuser_stat->{userid}}); # mognodb3.2 削除してから
                   $timelinecoll->insert_one($npcuser_stat);
                   $timelinelog->insert_one($npcuser_stat);
@@ -396,6 +398,96 @@ my $oncerun = "true";
 
                my $hash = { 'pointlist' => \@pointlist }; #受信した時と同じ状況
 
+               # trapevent処理
+          # trapeventのヒット判定
+               my $trapmember_cursole = $trapmemberlist->query({ location => {
+                                                           '$nearSphere' => {
+                                                           '$geometry' => {
+                                                            type => "point",
+                                                                "coordinates" => [ $npcuser_stat->{loc}->{lng} , $npcuser_stat->{loc}->{lat} ]},
+                                                           '$minDistance' => 0,
+                                                           '$maxDistance' => 1
+                                     }}});
+
+               my @trapevents = $trapmember_cursole->all;
+
+          #     my $debug = to_json(@trapevents);
+          #     Loging("DEBUG: trapevents: $debug");
+          #     undef $debug;
+
+               if ( $#trapevents != -1 ){
+                   Loging("DEBUG: TRAP on Event!!!!!!!");
+
+            # GHOSTなのでカウントはコメントアウト
+               #    my $memcountobj = $membercount->find_one_and_delete({'userid'=>$userid});
+               #    my $pcnt = 0;
+               #       $pcnt = $memcountobj->{count} if ($memcountobj ne 'null');
+               #       $pcnt = --$pcnt;
+               #       $self->app->log->debug("DEBUG: trap: on $username pcnt: $pcnt");
+               #       $memcountobj->{count} = $pcnt;
+               #       $memcountobj->{userid} = $userid;
+               #       delete $memcountobj->{_id};
+               #       $membercount->insert_one($memcountobj);
+               #       # redisを更新
+               #       $redis->zadd('gscore', "$pcnt", $email);
+
+                       #Chat表示 トラップ発動時に表示する
+                       #日付設定 重複記述あり
+                       my $dt = DateTime->now( time_zone => 'Asia/Tokyo');
+                       # TTLレコードを追加する。
+                       my $ttl = DateTime->now();
+
+                       my $chatobj = { geometry => $npcuser_stat->{geometry},
+                                            loc => $npcuser_stat->{loc},
+                                       icon_url => $npcuser_stat->{icon_url},
+                                       username => $username,
+                                            hms => $dt->hms,
+                                           chat => "$trapevents[0]->{message}",
+                                            ttl => $ttl,
+                                     };
+
+                        # walkchatへの書き込み
+                        $walkchatcoll->insert_one($chatobj);
+                        Loging("DEBUG: $username insert chat");
+
+                        my $chatjson = to_json($chatobj);
+
+                        # 書き込み通知
+                        $redis->publish( $chatname , $chatjson );
+                        $redis->expire( $chatname => 3600 );
+                        Loging("DEBUG: $username publish WALKCHAT");
+
+                   for my $i (@trapevents){
+                     #  my $debug = to_json($i);
+                   # delete trapevent
+                     #  Loging("DEBUG: drop: $debug");
+                       $trapmemberlist->delete_one({ '_id' => $i->{_id}});
+                   }
+
+                   # MemberTimeLineからの削除
+                   $timelinecoll->delete_many({"userid" => "$npcuser_stat->{userid}"}); # mognodb3.2
+
+                   # NPCアカウントの終了処理
+                             my @list = @$run_gacclist;
+                             for (my $i=0; $i <= $#list ; $i++){
+                                 if ( $list[$i]->{userid} eq $npcuser_stat->{userid}){
+                                  splice(@$run_gacclist,$i,1);
+                                 }
+                             }
+                             # redisへの更新
+                             my $run_json = to_json($run_gacclist);
+                             $redis->set("GACC$ghostmanid" => $run_json);
+                             $redis->expire("GACC$ghostmanid" => 12 ); #12秒保持する
+                             undef $run_json;
+
+                             if ( !@$run_gacclist) {
+                                 # 空なら終了
+                                 exit;
+                                 }
+                             undef @list;
+                             next;
+               } # if
+
 
             # 終了判定
             if ( defined $attack_chk->{to} ){
@@ -416,12 +508,22 @@ my $oncerun = "true";
                             # 1sec waitさせる 上記の書き込みは本来web経由だが、直接書き込み処理の為、waitを入れる
                             Mojo::IOLoop->timer(1 => $delay->begin);
 
+                            # 履歴を読んでカウントアップする
+                            my $memcountobj = $membercount->find_one_and_delete({'userid'=>"$attack_chk->{execute}"});
+                            my $pcnt = 0;
+                               $pcnt = $memcountobj->{count} if ($memcountobj ne 'null');
+                               $pcnt = ++$pcnt;
+                               $memcountobj->{count} = $pcnt;
+                               $memcountobj->{userid} = $attack_chk->{execute};
+                            delete $memcountobj->{_id};
+
+                               $membercount->insert_one($memcountobj);
+
                             #撃墜結果を集計
                                           #NPCが接続した状態で、executeしたuidのデータを作成する。
-                            my $executelist = $timelinelog->find({ 'execute' => $attack_chk->{execute}, 'hitname' => {'$exists' => 1} });
-
-                            my @execute = $executelist->all;
-                            my $pcnt = $#execute + 1;
+                        #    my $executelist = $timelinelog->find({ 'execute' => $attack_chk->{execute}, 'hitname' => {'$exists' => 1} });
+                        #    my @execute = $executelist->all;
+                        #    my $pcnt = $#execute + 1;
 
                             $redis->set( "GHOSTGET$attack_chk->{execute}" => $pcnt );
 
@@ -433,7 +535,7 @@ my $oncerun = "true";
                             $chatobj->{chat} = $txtmsg;
                             writechatobj($npcuser_stat);
 
-                            undef @execute;
+                        #    undef @execute;
                             undef $pcnt;
                        },
                        sub {
