@@ -309,6 +309,20 @@ my $oncerun = "true";
         }
         undef @list;
 
+        #redisで攻撃判定の受信
+        $redis->subscribe(\@chatArray, sub {
+                      my ($redis, $err) = @_;
+                    #     return $redis->publish( $chatname => $err) if $err;
+                         Loging("DEBUG: $username redis subscribe");
+                         return $redis->incr(@chatArray);
+                      });
+        $redis->expire( \@chatArray => 3600 );
+
+        $redis->on(error => sub {
+                      my ($redis,$err) = @_;
+                         Loging("DEBUG: $username redis error: $err");
+                      });
+
         foreach my $acc (@$gacclist){
                    push(@$run_gacclist,$acc) unless grep { $_->{name} =~ $acc->{name} } @$run_gacclist;
                #    my $debug = to_json($acc);
@@ -361,9 +375,10 @@ my $oncerun = "true";
                              next; # foreach $necuser_stat
                              }
 
-           # 攻撃を受けたか確認する　基本NPC用
-           my $attack_chk = $timelinecoll->find_one({ "to" => $userid });
-           Loging("DEBUG: $attack_chk->{execute} | $attack_chk->{execemail} | $attack_chk->{icon_url} ");
+           # 攻撃を受けたか確認する　基本NPC用 redisへ移行の為コメント
+            my $attack_chk;
+       #    my $attack_chk = $timelinecoll->find_one({ "to" => $userid });
+       #    Loging("DEBUG: $attack_chk->{execute} | $attack_chk->{execemail} | $attack_chk->{icon_url} ");
 
            # mongo3.2用 3000m以内のデータを返す
            my $geo_points_cursole = $timelinecoll->query({ geometry => {
@@ -489,7 +504,7 @@ my $oncerun = "true";
                } # if
 
 
-            # 終了判定
+            # 終了判定 redis移行でこの項目はredis　onにコピー、実質不要
             if ( defined $attack_chk->{to} ){
                 if ( $attack_chk->{to} eq $userid ) {
 
@@ -525,7 +540,7 @@ my $oncerun = "true";
                         #    my @execute = $executelist->all;
                         #    my $pcnt = $#execute + 1;
 
-                            $redis->set( "GHOSTGET$attack_chk->{execute}" => $pcnt );
+                        #    $redis->set( "GHOSTGET$attack_chk->{execute}" => $pcnt );
 
                             #ランキング処理
                             #攻撃シグナルにexecemailを追加して、emailでsidを検索出来るように修正した。
@@ -1457,11 +1472,83 @@ sub writechatobj {
              } # search
 
       } #foreach $run_gacclist
+      # 以上は10秒毎に実行されるアカウントループ
 
              my $run_json = to_json($run_gacclist);
                 $redis->set("GACC$ghostmanid" => $run_json);
                 $redis->expire("GACC$ghostmanid" => 12 ); #12秒保持する
                 undef $run_json;
+
+     # 以下redisイベント受信時の処理
+     #redis receve
+     $redis->on(message => sub {
+                  my ($redis,$mess,$channel) = @_;
+                      Loging("DEBUG: on channel:($username) $mess");
+
+                      if ( $channel ne $chatname ) { return; } # filter channel
+
+                      my $messobj = from_json($mess);
+
+                      if ( defined $messobj->{chat} ) { return; }  # chatはパスする
+
+                      #実行時点でのアカウントが不明なので、受信時にアカウントを一通りチェックする必要がある。
+                      my $dropacc;
+                      foreach my $acc (@$run_gacclist){
+                          if ( $messobj->{to} eq $acc->{userid} ){
+                              $dropacc = $acc;
+                              last;
+                          }
+                      }
+                      # 担当していないアカウントの場合パスする。
+                      if (! defined $dropacc){
+                         Loging("Not Domain account...pass $messobj->{execemail}");
+                         return; 
+                         }
+                                Loging("DEBUG: redis acc loop: $dropacc->{name}");
+
+                              # toが重複するケースが在るので先にrun_gacclistから除外をしないと回数が増える。。。
+                                my @list = @$run_gacclist;
+                                for (my $i=0; $i <= $#list ; $i++){
+                                    if ( $list[$i]->{userid} eq $messobj->{to}){
+                                     splice(@$run_gacclist,$i,1);
+                                     Loging("DROP ACC $list[$i]->{name} ");
+                                     last;
+                                    } 
+                                }
+                                # redisへの更新
+                                my $run_json = to_json($run_gacclist);
+                                $redis->set("GACC$ghostmanid" => $run_json);
+                                $redis->expire("GACC$ghostmanid" => 12 ); #12秒保持する
+                                undef $run_json;
+                                undef @list;
+
+                       # 元々はhitnameをsite1に送るが、db直結になりアカウント情報を持つのでhitnameを利用しない
+                                Loging("$username 祓われた。。。");
+                                $timelinecoll->delete_many({"userid" => "$messobj->{to}"}); # mognodb3.2
+
+                                # 履歴を読んでカウントアップする
+                                my $memcountobj = $membercount->find_one_and_delete({'userid'=>"$messobj->{execute}"});
+                                my $pcnt = 0;
+                                   $pcnt = $memcountobj->{count} if ($memcountobj ne 'null');
+                                   $pcnt = ++$pcnt;
+                                   $memcountobj->{count} = $pcnt;
+                                   $memcountobj->{userid} = $messobj->{execute};
+                                   delete $memcountobj->{_id};
+
+                            #    Loging("DEBUG: $pcnt : $messobj->{execute} | $messobj->{to} | $dropacc->{name} ");
+
+                                   $membercount->insert_one($memcountobj);
+
+                                #ランキング処理
+                                $redis->zadd('gscore', "$pcnt", "$messobj->{execemail}");
+
+                                my $txtmsg = "そして$dropacc->{name} は祓われた！";
+                                $chatobj->{chat} = $txtmsg;
+                                writechatobj($dropacc);
+
+                                undef $pcnt;
+                  });  # redis on message
+
 
         Loging("---------------------LOOP END-----------------------------------");
    }); #loop 
