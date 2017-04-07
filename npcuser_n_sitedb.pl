@@ -22,6 +22,7 @@ use Clone qw(clone);
 #use Mojo::IOLoop;
 #use Mojo::IOLoop::Delay;
 use MongoDB;
+#use Mango;
 #use Mojo::Redis2;
 use Encode qw(encode_utf8 decode_utf8);
 #use Data::Dumper;
@@ -29,6 +30,7 @@ use Encode qw(encode_utf8 decode_utf8);
 #use Devel::Cycle;
 use Scalar::Util qw(weaken);
 use Devel::Peek;
+use EV;
 use AnyEvent;
 #use Redis;
 use AnyEvent::Redis;
@@ -37,6 +39,7 @@ $| = 1;
 
 # DB設定
 my $mongoclient = MongoDB->connect('mongodb://dbs-1:27017');
+#my $mango = Mango->new('mongodb://dbs-1:27017'); 
 
 #一般コマンド用
 my $redis = AnyEvent::Redis->new(
@@ -84,13 +87,20 @@ my @keyword = ( "コンビニ",
                 "病院",
                 "郵便局",
                 "商店",
-                "ストアー",
-                "スタンド",
                 "公園",
-                "モール",
                 "学校",
                 "ファーストフード",
                 "菓子", 
+                "工場",
+                "酒造",
+                "道の駅",
+                "遊園地",
+                "花屋",
+                "牧場",
+                "ゴルフ",
+                "野球",
+                "消防署",
+                "警察署",
               );
 
 my $apikey = "AIzaSyC8BavSYT3W-CNuEtMS5414s3zmtpJLPx8";
@@ -361,8 +371,10 @@ sub writejson {
 
              my $debmsg = to_json($npcuser_stat);
                  Loging("WRITE MONGODB: $debmsg");
-                 $timelinecoll->insert_one($npcuser_stat);
-                 $timelinelog->insert_one($npcuser_stat);
+
+                $timelinecoll->insert_one($npcuser_stat);
+
+                $timelinelog->insert_one($npcuser_stat);
 
              undef $debmsg;
 
@@ -400,8 +412,6 @@ sub writechatobj {
 
 # main ###############
 
-
-
 #get_gacclist(); # AE
 
 # $gacclistと実行中のリストの分岐、 アカウントの削除は自前で追加のみチェックする
@@ -429,7 +439,7 @@ npcinit();
     } # foreach $npcuser_stat
 
 ##ループ処理 
-while (1) {
+#while (1) {
 
 
 # redis lisner  get_gacclist!!
@@ -467,7 +477,7 @@ while (1) {
                           } 
                      }); 
 
-    my $cv = AnyEvent->condvar;
+    my $cv = AE::cv;
     my $t = AnyEvent->timer(
             after => 10,
             interval => 10,
@@ -599,7 +609,7 @@ undef $targets;
 
 
              Loging("LIFECOUNT: $npcuser_stat->{lifecount}");
-                           $npcuser_stat->{lifecount}--;
+                       #    $npcuser_stat->{lifecount}--;     # コメントアウトしている間は無期限稼働、メモリーリークは回避しているので。。。
                            if ( $npcuser_stat->{lifecount} <= 0 ) {
                              Loging("時間切れで終了...");
 
@@ -625,6 +635,8 @@ undef $targets;
                              next; # foreach $npcuser_stat
                              }
 
+           my $asyncv = AE::cv;
+
            # mongo3.2用 3000m以内のデータを返す
            my $geo_points_cursole = $timelinecoll->query({ geometry => {
                                                            '$nearSphere' => {
@@ -635,6 +647,10 @@ undef $targets;
                                                            '$maxDistance' => 3000
                                      }}});
            @pointlist = $geo_points_cursole->all; # 原則重複無しの想定
+
+           $asyncv->send(@pointlist);
+
+           $asyncv->recv;
 
            #makerをredisから抽出して、距離を算出してリストに加える。
            #  my @makerkeylist = $redis->keys("Maker*");  #以下に置き換え
@@ -778,7 +794,7 @@ undef $targets;
               } # if
         }
 
-undef $geo_points_cursole;
+undef $geo_points_cursole; 
 
 
              # テスト用　位置保持
@@ -875,20 +891,21 @@ undef $geo_points_cursole;
 
                 # モード変更チェック 
 
-                   if (int(rand(10)) > 8) {
+                if (($npcuser_stat->{status} eq "random" ) && ( $#chk_targets > 20 )) {
+                   # runawayモードへ変更
+                          $npcuser_stat->{status} = "runaway";
+                          Loging("Mode change Runaway!");
+                          writejson($npcuser_stat);
+                          my $txtmsg  = "逃走モードになったよ！";
+                             $txtmsg = encode_utf8($txtmsg);
+                          $chatobj->{chat} = $txtmsg;
+                       #   writechatobj($npcuser_stat);
+                          undef $txtmsg;
+                          next;
+                    }
 
-                        if ($#chk_targets == -1) { next; } #pass
-
-                        $npcuser_stat->{status} = "chase";
-                        Loging("Mode change Chase!");
-                        writejson($npcuser_stat);
-
-                        my $txtmsg  = "追跡モードになったよ！";
-                        $txtmsg = encode_utf8($txtmsg);
-                        $chatobj->{chat} = $txtmsg;
-                      #  writechatobj($npcuser_stat);
-                        next;
-                   } elsif (int(rand(10)) > 6 ) {
+                   # 乱数によるモード変更
+                   if (int(rand(50)) > 48) {
 
                    ####     if ($#chk_targets == -1) { next; } #pass  searchではtargetは不要
 
@@ -902,7 +919,20 @@ undef $geo_points_cursole;
                       #  writechatobj($npcuser_stat);
                         undef $txtmsg;
                         next;
-                   } elsif (int(rand(10)) > 6 ) {
+                   } elsif (int(rand(50)) > 48 ) {
+
+                        if ($#chk_targets == -1) { next; } #pass
+
+                        $npcuser_stat->{status} = "chase";
+                        Loging("Mode change Chase!");
+                        writejson($npcuser_stat);
+
+                        my $txtmsg  = "追跡モードになったよ！";
+                        $txtmsg = encode_utf8($txtmsg);
+                        $chatobj->{chat} = $txtmsg;
+                      #  writechatobj($npcuser_stat);
+                        next;
+                   } elsif (int(rand(50)) > 48 ) {
 
                         if ($#chk_targets == -1) { next; } #pass
 
@@ -916,7 +946,7 @@ undef $geo_points_cursole;
                      #   writechatobj($npcuser_stat);
                         undef $txtmsg;
                         next;
-                   } elsif (int(rand(10)) > 8 ) {
+                   } elsif (int(rand(50)) > 48 ) {
 
                         if ($#chk_targets == -1) { next; } #pass
 
@@ -969,20 +999,6 @@ undef $geo_points_cursole;
                         }
                      undef @t_list;
                 }  # t_dist > 2000 
-
-              if (($npcuser_stat->{status} eq "random" ) && ( $#chk_targets > 20 )) {
-                 # runawayモードへ変更
-                        $npcuser_stat->{status} = "runaway";
-                        Loging("Mode change Runaway!");
-                        writejson($npcuser_stat);
-                        my $txtmsg  = "逃走モードになったよ！";
-                           $txtmsg = encode_utf8($txtmsg);
-                        $chatobj->{chat} = $txtmsg;
-                     #   writechatobj($npcuser_stat);
-                        undef $txtmsg;
-                        next;
-                  }
-
 
               writejson($npcuser_stat);
               undef @chk_targets; 
@@ -1142,12 +1158,14 @@ undef $geo_points_cursole;
                  $npcuser_stat->{status} = "round"; 
                  $target = "";
                  $npcuser_stat->{target} = "";
+                 writejson($npcuser_stat);
                  Loging("Mode Change........round.");
                  my $txtmsg  = "roundモードになったよ！";
                     $txtmsg = encode_utf8($txtmsg);
                  $chatobj->{chat} = $txtmsg;
               #   writechatobj($npcuser_stat);
                  undef $txtmsg;
+                 next;
                  }
 
 
@@ -1162,8 +1180,23 @@ undef $geo_points_cursole;
                         $chatobj->{chat} = $txtmsg;
                      #   writechatobj($npcuser_stat);
                         undef $txtmsg;
+                        next;
                   }
 
+              # 確立で諦める
+              if (($npcuser_stat->{status} eq "chase" ) && ( int(rand(1000)) == 666 )) {
+
+                 # rundomモードへ変更
+                        $npcuser_stat->{status} = "random";
+                        Loging("Mode change random!");
+                        writejson($npcuser_stat);
+                        my $txtmsg  = "ランダムモードになったよ！";
+                           $txtmsg = encode_utf8($txtmsg);
+                        $chatobj->{chat} = $txtmsg;
+                     #   writechatobj($npcuser_stat);
+                        undef $txtmsg;
+                        next;
+                  }
 
               writejson($npcuser_stat);
 
@@ -1268,27 +1301,27 @@ undef $geo_points_cursole;
               if ( geoarea($lat,$lng) == 1 ) {
 
               if ($runway_dir == 1) {
-                        $lat = $lat + rand($point_spn + 0.001);
+                        $lat = $lat + rand($point_spn + 0.002);
                         $lat = overArealat($lat);
-                        $lng = $lng + rand($point_spn + 0.001);
+                        $lng = $lng + rand($point_spn + 0.002);
                         $lng = overArealng($lng);
                           }
               if ($runway_dir == 2) {
-                        $lat = $lat - rand($point_spn + 0.001);
+                        $lat = $lat - rand($point_spn + 0.002);
                         $lat = overArealat($lat);
-                        $lng = $lng + rand($point_spn + 0.001);
+                        $lng = $lng + rand($point_spn + 0.002);
                         $lng = overArealng($lng);
                           }
               if ($runway_dir == 3) {
-                        $lat = $lat - rand($point_spn + 0.001);
+                        $lat = $lat - rand($point_spn + 0.002);
                         $lat = overArealat($lat);
-                        $lng = $lng - rand($point_spn + 0.001);
+                        $lng = $lng - rand($point_spn + 0.002);
                         $lng = overArealng($lng);
                           }
               if ($runway_dir == 4) {
-                        $lat = $lat + rand($point_spn + 0.001);
+                        $lat = $lat + rand($point_spn + 0.002);
                         $lat = overArealat($lat);
-                        $lng = $lng - rand($point_spn + 0.001);
+                        $lng = $lng - rand($point_spn + 0.002);
                         $lng = overArealng($lng);
                           }
 
@@ -1307,7 +1340,7 @@ undef $geo_points_cursole;
               } # geoarea if
 
               #ターゲットが規定以下の場合は
-              if (($#chk_targets < 20) && (int(rand(10) > 7))) {
+              if (($#chk_targets < 20) && (int(rand(50) > 45))) {
                         $npcuser_stat->{status} = "round";
                         Loging("Mode change Round!");
                         writejson($npcuser_stat);
@@ -1317,18 +1350,21 @@ undef $geo_points_cursole;
                         $chatobj->{chat} = $txtmsg;
                      #   writechatobj($npcuser_stat);
                         undef $txtmsg;
+                        next;
 
               # 3000m以上に離れるとモードを変更
               } elsif (($t_dist > 3000 ) && ($#chk_targets > 20)) {
                  $npcuser_stat->{status} = "random"; 
                  $target = "";
                  $npcuser_stat->{target} = "";
+                 writejson($npcuser_stat);
                  Loging("Mode Change........radom.");
                  my $txtmsg  = "Randomモードになったよ！";
                     $txtmsg = encode_utf8($txtmsg);
                  $chatobj->{chat} = $txtmsg;
               #   writechatobj($npcuser_stat);
                  undef $txtmsg;
+                 next;
                  }
 
               writejson($npcuser_stat);
@@ -1410,8 +1446,8 @@ undef $geo_points_cursole;
 
               my $round_dire = 1;
               # 低い確率で方向が変わる
-              if ( rand(10) > 8 ) {
-              if ( rand(10) > 5 ) { 
+              if ( rand(50) > 45 ) {
+              if ( rand(100) > 50 ) { 
                                     $round_dire = 1;
                                    } else { 
                                     $round_dire = 2;
@@ -1440,27 +1476,27 @@ undef $geo_points_cursole;
 
               # 周回は速度を上乗せ
               if ($runway_dir == 1) {
-                        $lat = $lat + rand($point_spn+0.001);
+                        $lat = $lat + rand($point_spn+0.003);
                         $lat = overArealat($lat);
-                        $lng = $lng + rand($point_spn+0.001);
+                        $lng = $lng + rand($point_spn+0.003);
                         $lng = overArealng($lng);
                           }
               if ($runway_dir == 2) {
-                        $lat = $lat - rand($point_spn+0.001);
+                        $lat = $lat - rand($point_spn+0.003);
                         $lat = overArealat($lat);
-                        $lng = $lng + rand($point_spn+0.001);
+                        $lng = $lng + rand($point_spn+0.003);
                         $lng = overArealng($lng);
                           }
               if ($runway_dir == 3) {
-                        $lat = $lat - rand($point_spn+0.001);
+                        $lat = $lat - rand($point_spn+0.003);
                         $lat = overArealat($lat);
-                        $lng = $lng - rand($point_spn+0.001);
+                        $lng = $lng - rand($point_spn+0.003);
                         $lng = overArealng($lng);
                           }
               if ($runway_dir == 4) {
-                        $lat = $lat + rand($point_spn+0.001);
+                        $lat = $lat + rand($point_spn+0.003);
                         $lat = overArealat($lat);
-                        $lng = $lng - rand($point_spn+0.001);
+                        $lng = $lng - rand($point_spn+0.003);
                         $lng = overArealng($lng);
                           }
               } elsif ( geoarea($lat,$lng) == 2 ) {
@@ -1481,12 +1517,14 @@ undef $geo_points_cursole;
                  $npcuser_stat->{status} = "random"; 
                  $target = "";
                  $npcuser_stat->{target} = "";
+                 writejson($npcuser_stat);
                  Loging("Mode Change........radom.");
                  my $txtmsg  = "Randomモードになったよ！";
                     $txtmsg = encode_utf8($txtmsg);
                  $chatobj->{chat} = $txtmsg;
               #   writechatobj($npcuser_stat);
                  undef $txtmsg;
+                 next;
                  } 
 
               if (($npcuser_stat->{status} eq "round") && ( $#chk_targets > 20 )) {
@@ -1499,8 +1537,8 @@ undef $geo_points_cursole;
                         $chatobj->{chat} = $txtmsg;
                      #   writechatobj($npcuser_stat);
                         undef $txtmsg;
+                        next;
                 }
-
 
               writejson($npcuser_stat);
 
@@ -1581,6 +1619,7 @@ undef $geo_points_cursole;
                     undef $resjson;
 
                 } # if nameが空ならば
+
                 # move
                 my $runway_dir = 1;
 
@@ -1656,6 +1695,7 @@ undef $geo_points_cursole;
                    $chatobj->{chat} = $txtmsg;
                 #   writechatobj($npcuser_stat);
                    undef $txtmsg;
+                   next;
                }
 
               if (($npcuser_stat->{status} eq "search" ) && ( $#chk_targets > 20 )) {
@@ -1678,7 +1718,7 @@ undef $geo_points_cursole;
       } #foreach $run_gacclist   ######################################################
       # 以上は10秒毎に実行されるアカウントループ
 
-# redis lisner  書き込み前にチェックしないと追加アカウントを認識出来ない
+# redis 書き込み前にチェックしないと追加アカウントを認識出来ない
   $redis->get("GACC$ghostmanid", sub{
                      my $result = shift;
                         if ( ! defined $result) { 
@@ -1720,8 +1760,8 @@ undef $geo_points_cursole;
 
         Loging("---------------------LOOP END-----------------------------------");
 
-       $cv->send;
+    #   $cv->send;  # never end loop
        });  # AnyEvent CV 
     $cv->recv;
-} #while  AnyEvnt  
+#} #while  AnyEvnt  
 

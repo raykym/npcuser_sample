@@ -435,7 +435,7 @@ my @keyword = ( "コンビニ",
 
                         $txtmsg = "Searchモードに変わったよ！";
                         $chatobj->{chat} = $txtmsg;
-                        sendchatobj($tx);
+                     #   sendchatobj($tx);
 
                         return;
                    }
@@ -563,7 +563,7 @@ my @keyword = ( "コンビニ",
 
                    $txtmsg = "Randomモードに変わったよ！";
                    $chatobj->{chat} = $txtmsg;
-                   sendchatobj($tx);
+                #   sendchatobj($tx);
 
                    return;
                }
@@ -715,7 +715,7 @@ my @keyword = ( "コンビニ",
                  Loging("Mode Change........radom.");
                  my $txtmsg  = "Randomモードになったよ！";
                  $chatobj->{chat} = $txtmsg;
-                 sendchatobj($tx);
+               #  sendchatobj($tx);
                  }
 
              } # if chase

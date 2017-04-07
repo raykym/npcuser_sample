@@ -445,7 +445,7 @@ my $oncerun = "true";
 
                         my $txtmsg  = "追跡モードになったよ！";
                         $chatobj->{chat} = $txtmsg;
-                        sendchatobj($tx);
+                     #   sendchatobj($tx);
                      #   return;
                    } elsif (int(rand(10)) > 6 ) {
 
@@ -457,7 +457,7 @@ my $oncerun = "true";
 
                         my $txtmsg  = "周回モードになったよ！";
                         $chatobj->{chat} = $txtmsg;
-                        sendchatobj($tx);
+                     #   sendchatobj($tx);
                      #   return;
                    } elsif (int(rand(10)) > 8 ) {
 
@@ -469,7 +469,7 @@ my $oncerun = "true";
 
                         my $txtmsg  = "逃走モードになったよ！";
                         $chatobj->{chat} = $txtmsg;
-                        sendchatobj($tx);
+                     #   sendchatobj($tx);
                      #   return;
                    }
 
@@ -516,7 +516,7 @@ my $oncerun = "true";
                         sendjson($tx);
                         my $txtmsg  = "逃走モードになったよ！";
                         $chatobj->{chat} = $txtmsg;
-                        sendchatobj($tx);
+                    #    sendchatobj($tx);
                     #    return;
                   }
 
@@ -608,7 +608,7 @@ sub sendchatobj {
                  Loging("Mode Change........radom.");
                  my $txtmsg  = "Randomモードになったよ！";
                  $chatobj->{chat} = $txtmsg;
-                 sendchatobj($tx);
+               #  sendchatobj($tx);
 
                #  return;
                  }
@@ -715,7 +715,7 @@ sub sendchatobj {
                  Loging("Mode Change........radom.");
                  my $txtmsg  = "Randomモードになったよ！";
                  $chatobj->{chat} = $txtmsg;
-                 sendchatobj($tx);
+               #  sendchatobj($tx);
                  }
 
 
@@ -726,7 +726,7 @@ sub sendchatobj {
                         sendjson($tx);
                         my $txtmsg  = "逃走モードになったよ！";
                         $chatobj->{chat} = $txtmsg;
-                        sendchatobj($tx);
+                     #   sendchatobj($tx);
                      #   return;
                   }
 
@@ -765,7 +765,7 @@ sub sendchatobj {
                  Loging("Mode Change........radom.");
                  my $txtmsg  = "Randomモードになったよ！";
                  $chatobj->{chat} = $txtmsg;
-                 sendchatobj($tx);
+              #   sendchatobj($tx);
                  return;
                  }
 
@@ -855,7 +855,7 @@ sub sendchatobj {
 
                         my $txtmsg  = "周回モードになったよ！";
                         $chatobj->{chat} = $txtmsg;
-                        sendchatobj($tx);
+                    #    sendchatobj($tx);
 
               # 1500m以上に離れるとモードを変更
               } elsif (($t_dist > 1500 ) || ($#chk_targets > 20)) {
@@ -865,7 +865,7 @@ sub sendchatobj {
                  Loging("Mode Change........radom.");
                  my $txtmsg  = "Randomモードになったよ！";
                  $chatobj->{chat} = $txtmsg;
-                 sendchatobj($tx);
+              #   sendchatobj($tx);
                  }
 
           #   undef @chk_targets; # clear
@@ -900,7 +900,7 @@ sub sendchatobj {
                  Loging("Mode Change........radom.");
                  my $txtmsg  = "Randomモードになったよ！";
                  $chatobj->{chat} = $txtmsg;
-                 sendchatobj($tx);
+              #   sendchatobj($tx);
                  }
 
               my $deb_obj = to_json($t_obj); 
@@ -996,7 +996,7 @@ sub sendchatobj {
                  Loging("Mode Change........radom.");
                  my $txtmsg  = "Randomモードになったよ！";
                  $chatobj->{chat} = $txtmsg;
-                 sendchatobj($tx);
+              #   sendchatobj($tx);
                  } 
 
               if (($npcuser_stat->{status} eq "round") && ( $#chk_targets > 20 )) {
@@ -1006,7 +1006,7 @@ sub sendchatobj {
                         sendjson($tx);
                         my $txtmsg  = "逃走モードになったよ！";
                         $chatobj->{chat} = $txtmsg;
-                        sendchatobj($tx);
+                     #   sendchatobj($tx);
                         return;
                 }
 
@@ -1030,11 +1030,11 @@ sub sendchatobj {
             #  $tx->send( { json => $npcuser_stat } );
               sendjson($tx);
               return;
-          }); #ループ
+          });   #ua
 
           $tx->finish if ($tx->is_websocket);
 
-   }); # ua websocket
+   }); #loop 
 
    Mojo::IOLoop->start unless Mojo::IOLoop->is_running;
 

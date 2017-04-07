@@ -566,11 +566,11 @@ sub sendchatobj {
                      push(@$targets,$i);
                  }
 
+       if ( $npcuser_stat->{status} eq "chase" ){
+
              # CHECK
              my @chk_targets = @$targets;
              Loging("DEBUG: Targets $#chk_targets ");
-
-       if ( $npcuser_stat->{status} eq "chase" ){
 
              if (($target eq "")&&($#chk_targets > 0)) {
                      my @t_list = @$targets; 
@@ -1017,7 +1017,7 @@ sub sendchatobj {
 
           #    $tx->send( { json => $npcuser_stat } );
               sendjson($tx);
-              return;
+          #    return;
           }); # ua websocket
 
           $tx->finish if ($tx->is_websocket);
