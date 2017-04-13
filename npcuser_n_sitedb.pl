@@ -3,7 +3,7 @@
 # site1を経由せずDBへ直接書き込みバージョン
 # アカウント情報はredisから受け取り、個々の処理を行って、mongodb、redisへ位置情報を書き戻す
 # 終了処理も此処で行い、mongodbとredisへ送信する
-# 起動時に引数でsidを受け取る。postでこれを返す事でリストを得る
+# 起動時に引数でsidを受け取る。
 # Mojo::Redis2のメモリーリークが問題なので、Redis、AnyEvent::Redisに置き換え
 #
 # 緯度経度の限界処理追加
@@ -29,7 +29,7 @@ use Encode qw(encode_utf8 decode_utf8);
 #use Devel::Size qw/total_size/;
 #use Devel::Cycle;
 use Scalar::Util qw(weaken);
-use Devel::Peek;
+#use Devel::Peek;
 use EV;
 use AnyEvent;
 #use Redis;

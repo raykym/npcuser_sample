@@ -18,6 +18,8 @@ use Clone qw(clone);
 use Mojo::IOLoop::Delay;
 #use Encode qw(encode_utf8 decode_utf8);
 #use Data::Dumper;
+use EV;
+use AnyEvent;
 
 $| = 1;
 
@@ -243,6 +245,18 @@ my $oncerun = "true";
       }
 
 #ループ処理 websocketも再接続される 
+my $cv = AE::cv;
+my $w = AnyEvent->signal( signal => 'TERM',
+                          cb => sub {
+                                $cv->send;
+                               });
+
+
+# websocketでの位置情報送受信
+  $ua->websocket('wss://www.backbone.site/walkworld' => sub {
+    my ($ua,$tx) = @_;
+
+    # internal loop
     Mojo::IOLoop->recurring(
                      10 => sub {
                            my $loop = shift;
@@ -252,12 +266,8 @@ my $oncerun = "true";
                              Loging("時間切れで終了...");
                              exit;
                              }
-
     Loging("lifecount: $lifecount");
 
-# websocketでの位置情報送受信
-  $ua->websocket('wss://www.backbone.site/walkworld' => sub {
-    my ($ua,$tx) = @_;
 
     $tx->on(json => sub {
         my ($tx,$hash) = @_;
@@ -307,12 +317,12 @@ my $oncerun = "true";
             $targetlist = clone($pointlist);
 
      # デバッグ用
-         Loging("---------------TOP");
-         for my $linejson (@$pointlist) { 
-           my $i = to_json($linejson);
-           Loging("$i");
-         }
-         Loging("---------------END");
+     #    Loging("---------------TOP");
+     #    for my $linejson (@$pointlist) { 
+     #      my $i = to_json($linejson);
+     #      Loging("$i");
+     #    }
+     #    Loging("---------------END");
 
      # Makerがある場合の処理 targetをmakerに変更してstatをchaseに
         foreach my $poi ( @$pointlist ) {
@@ -1030,11 +1040,12 @@ sub sendchatobj {
             #  $tx->send( { json => $npcuser_stat } );
               sendjson($tx);
               return;
-          });   #ua
 
-          $tx->finish if ($tx->is_websocket);
-
-   }); #loop 
+             }); # internal loop
 
    Mojo::IOLoop->start unless Mojo::IOLoop->is_running;
 
+          });   #ua
+        #  $tx->finish if ($tx->is_websocket);  # websocket eternal
+
+$cv->recv;

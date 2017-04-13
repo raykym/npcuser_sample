@@ -20,6 +20,8 @@ use Math::Trig qw(great_circle_distance rad2deg deg2rad pi);
 use Clone qw(clone);
 
 use Mojo::IOLoop::Delay;
+use EV;
+use AnyEvent;
 
 $| = 1;
 
@@ -265,11 +267,21 @@ my @keyword = ( "コンビニ",
               iconchg($npcuser_stat->{status});
               sendjson($tx);
               $oncerun = "false";   
+              Loging("send Once!");
         }); 
       }
 
+my $loopid;
+
 #ループ処理 websocketも再接続される 10secで更新に変更 追いかけっこしない想定なら60秒も有り
-    Mojo::IOLoop->recurring(
+my $cv = AE::cv;
+my $w = AnyEvent->signal( signal => 'TERM',
+                          cb => sub {
+                                $cv->send;
+                                });
+
+    # loop
+    $loopid = Mojo::IOLoop->recurring(
                      10 => sub {
                            my $loop = shift;
 
@@ -281,9 +293,12 @@ my @keyword = ( "コンビニ",
 
     Loging("lifecount: $lifecount");
 
+my $txw;
+
 # websocketでの位置情報送受信
-  $ua->websocket('wss://www.backbone.site/walkworld' => sub {
+       $txw = $ua->websocket('wss://www.backbone.site/walkworld' => sub {
     my ($ua,$tx) = @_;
+
 
     $tx->on(json => sub {
         my ($tx,$hash) = @_;
@@ -323,6 +338,7 @@ my @keyword = ( "コンビニ",
              }
 
          Loging("webSocket responce! $email : $npcuser_stat->{status}");
+
             $pointlist = $hash->{pointlist};
             $targetlist = clone($pointlist);
 
@@ -340,7 +356,7 @@ my @keyword = ( "コンビニ",
               $npcuser_stat->{status} = "chase";
               Loging("Mode change Chase!");
               sendjson($tx);
-              return;
+              last;
               } 
         }
 
@@ -349,7 +365,6 @@ my @keyword = ( "コンビニ",
     $tx->on(finish => sub {
        my ($tx, $code, $reason) = @_;
        Loging("WebSocket closed with status $code. $username");
-       $tx->finish;
     #   exit;
     });
 
@@ -777,12 +792,15 @@ sub sendchatobj {
 
            #   $tx->send( { json => $npcuser_stat } );
               sendjson($tx);
-              return;
-          }); #ループ
+           #   return;
 
-          $tx->finish if ($tx->is_websocket);
+       #   $tx->finish if ($tx->is_websocket);
+          }); #ua
 
-   }); # ua websocket
-
+   }); # loop
    Mojo::IOLoop->start unless Mojo::IOLoop->is_running;
+
+
+$cv->recv;
+
 
