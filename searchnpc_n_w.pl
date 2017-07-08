@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 
 #
-# searchnpc_n.pl [email] [emailpass] {lat} {lng} {mode}
+# searchnpc_n_w.pl [email] [emailpass] {lat} {lng} {mode}
 # email passwordは必須
 # walkchatを追加した版
 # 緯度経度の通過処理追加
@@ -18,7 +18,6 @@ use Mojo::JSON qw(encode_json decode_json from_json to_json);
 use DateTime;
 use Math::Trig qw(great_circle_distance rad2deg deg2rad pi);
 use Clone qw(clone);
-
 use Mojo::IOLoop::Delay;
 use EV;
 use AnyEvent;
@@ -56,7 +55,7 @@ sub Loging{
 
 
 # Login認証
-my $tx = $ua->post('https://www.backbone.site/signinact' => form => { email => "$email", password => "$emailpass" });
+my $tx = $ua->post('https://westwind.backbone.site/signinact' => form => { email => "$email", password => "$emailpass" });
 
 if (my $res = $tx->success){ say $res->body }
    else {
@@ -68,7 +67,7 @@ if (my $res = $tx->success){ say $res->body }
 my $username = "";
 my $userid = "";
 
-  $tx = $ua->get('https://www.backbone.site/walkworld/view');
+  $tx = $ua->get('https://westwind.backbone.site/walkworld/view');
 
 if (my $res = $tx->success){ 
 
@@ -117,7 +116,7 @@ my $lifecount = 60480; #1week /10sec count
 
 my $icon_url = ""; # 暫定
 my $timerecord;
-my $point_spn = 0.0002;
+my $point_spn = 0.0002; #10sec
 my $direct_reng = 90;
 my $rundirect = int(rand(360));
 my $apikey = "AIzaSyC8BavSYT3W-CNuEtMS5414s3zmtpJLPx8";
@@ -191,6 +190,7 @@ sub spnchange {
              }
 }
 
+
 my $pointlist;
 my $targetlist; # chaseモード追加で利用 
 my $targets = [];
@@ -262,22 +262,18 @@ my @keyword = ( "コンビニ",
 
    if ($oncerun) {
       # 1回のみ送信 起動直後のマーカー表示用
-      $ua->websocket('wss://www.backbone.site/walkworld' => sub {
+      $ua->websocket('wss://westwind.backbone.site/walkworld' => sub {
           my ($ua,$tx) = @_;
               iconchg($npcuser_stat->{status});
               sendjson($tx);
               $oncerun = "false";   
-              Loging("send Once!");
         }); 
       }
 
-my $loopid;
-
 #ループ処理 websocketも再接続される 10secで更新に変更 追いかけっこしない想定なら60秒も有り
-
-  #  $loopid = Mojo::IOLoop->recurring(
-  #                   10 => sub {
-  #                         my $loop = shift;
+ #   Mojo::IOLoop->recurring(
+ #                    10 => sub {
+ #                          my $loop = shift;
 my $cv = AE::cv;
 my $t = AnyEvent->timer( after => 10,
                          interval => 10,
@@ -289,14 +285,11 @@ my $t = AnyEvent->timer( after => 10,
                              exit;
                              }
 
-    Loging("lifecount: $lifecount");
-
-my $txw;
+   Loging("lifecount: $lifecount");
 
 # websocketでの位置情報送受信
-       $txw = $ua->websocket('wss://www.backbone.site/walkworld' => sub {
+  $ua->websocket('wss://westwind.backbone.site/walkworld' => sub {
     my ($ua,$tx) = @_;
-
 
     $tx->on(json => sub {
         my ($tx,$hash) = @_;
@@ -336,7 +329,6 @@ my $txw;
              }
 
          Loging("webSocket responce! $email : $npcuser_stat->{status}");
-
             $pointlist = $hash->{pointlist};
             $targetlist = clone($pointlist);
 
@@ -354,7 +346,7 @@ my $txw;
               $npcuser_stat->{status} = "chase";
               Loging("Mode change Chase!");
               sendjson($tx);
-              last;
+              return;
               } 
         }
 
@@ -363,6 +355,7 @@ my $txw;
     $tx->on(finish => sub {
        my ($tx, $code, $reason) = @_;
        Loging("WebSocket closed with status $code. $username");
+       $tx->finish;
     #   exit;
     });
 
@@ -370,10 +363,6 @@ my $txw;
              if ( $npcuser_stat->{status} eq "STAY") {
                  iconchg($npcuser_stat->{status});
                  sendjson($tx);
-
-                 $txtmsg = "STAYですよ！!";
-                 $chatobj->{chat} = $txtmsg;
-                 sendchatobj($tx);
                  return;
                 }
 
@@ -385,9 +374,9 @@ my $txw;
                 my $runway_dir = 1;
 
                 if ($rundirect < 90) { $runway_dir = 1; }
-                if (( 90 <= $rundirect)&&( $rundirect < 180)) { $runway_dir = 2; }
-                if (( 180 <= $rundirect)&&( $rundirect < 270 )) { $runway_dir = 3; }
-                if (( 270 <= $rundirect)&&( $rundirect < 360 )) { $runway_dir = 4; }
+                if (( 90 < $rundirect)&&( $rundirect < 180)) { $runway_dir = 2; }
+                if (( 180 < $rundirect)&&( $rundirect < 270 )) { $runway_dir = 3; }
+                if (( 270 < $rundirect)&&( $rundirect < 360 )) { $runway_dir = 4; }
 
                 if ( geoarea($lat,$lng) == 1 ) {
 
@@ -448,7 +437,7 @@ my $txw;
 
                         $txtmsg = "Searchモードに変わったよ！";
                         $chatobj->{chat} = $txtmsg;
-                     #   sendchatobj($tx);
+                        sendchatobj($tx);
 
                         return;
                    }
@@ -509,9 +498,9 @@ my $txw;
                 Loging("DEBUG: rundirect: $rundirect ");
 
                 if ($rundirect < 90) { $runway_dir = 1; }
-                if (( 90 <= $rundirect)&&( $rundirect < 180)) { $runway_dir = 2; }
-                if (( 180 <= $rundirect)&&( $rundirect < 270 )) { $runway_dir = 3; }
-                if (( 270 <= $rundirect)&&( $rundirect < 360 )) { $runway_dir = 4; }
+                if (( 90 < $rundirect)&&( $rundirect < 180)) { $runway_dir = 2; }
+                if (( 180 < $rundirect)&&( $rundirect < 270 )) { $runway_dir = 3; }
+                if (( 270 < $rundirect)&&( $rundirect < 360 )) { $runway_dir = 4; }
 
                 Loging("DEBUG: runway_dir: $runway_dir ");
 
@@ -576,7 +565,7 @@ my $txw;
 
                    $txtmsg = "Randomモードに変わったよ！";
                    $chatobj->{chat} = $txtmsg;
-                #   sendchatobj($tx);
+                   sendchatobj($tx);
 
                    return;
                }
@@ -646,14 +635,15 @@ my $txw;
 
               Loging("Chase Direct: $t_direct Distace: $t_dist ");
 
+              # 速度の変更
               spnchange($t_dist);
 
               my $runway_dir = 1;
 
               if ($t_direct < 90) { $runway_dir = 1; }
-              if (( 90 <= $t_direct)&&( $t_direct < 180)) { $runway_dir = 2; }
-              if (( 180 <= $t_direct)&&( $t_direct < 270 )) { $runway_dir = 3; }
-              if (( 270 <= $t_direct)&&( $t_direct < 360 )) { $runway_dir = 4; }
+              if (( 90 < $t_direct)&&( $t_direct < 180)) { $runway_dir = 2; }
+              if (( 180 < $t_direct)&&( $t_direct < 270 )) { $runway_dir = 3; }
+              if (( 270 < $t_direct)&&( $t_direct < 360 )) { $runway_dir = 4; }
 
               if ( geoarea($lat,$lng) == 1 ) {
 
@@ -720,15 +710,15 @@ my $txw;
               } # geoarea if
 
 
-              # 10m以下に近づくとモードを変更
-              if ($t_dist < 10 ) {
+              # 5m以下に近づくとモードを変更
+              if ($t_dist < 5 ) {
                  $npcuser_stat->{status} = "random";
                  $target = "";
                  $npcuser_stat->{target} = "";
                  Loging("Mode Change........radom.");
                  my $txtmsg  = "Randomモードになったよ！";
                  $chatobj->{chat} = $txtmsg;
-               #  sendchatobj($tx);
+                 sendchatobj($tx);
                  }
 
              } # if chase
@@ -766,15 +756,13 @@ sub sendchatobj {
            my $tx = shift;
                   $chatobj->{loc}->{lat} = $lat;
                   $chatobj->{loc}->{lng} = $lng;
-              #    $chatobj->{chat} = encode_utf8($chatobj->{chat});
                   $chatobj->{geometry}->{coordinates}= [ $lng, $lat ];
                   $tx->send( { json => $chatobj } );
-                  Loging("sendchatobj: $chatobj->{chat}");
                   return;
 }
 
 
-              # 送信処理 random search 共通
+              # 送信処理 random search 共通  sendjson()に集約
           #    $timerecord = DateTime->now()->epoch();
           #    $timerecord = $timerecord * 1000; #ミリ秒に合わせるために
           #    $npcuser_stat->{time} = $timerecord;
@@ -788,15 +776,17 @@ sub sendchatobj {
 
               Loging("DEBUG: lat: $lat ( $npcuser_stat->{loc}->{lat} )  lng: $lng ( $npcuser_stat->{loc}->{lng} )");
 
-           #   $tx->send( { json => $npcuser_stat } );
+          #    $tx->send( { json => $npcuser_stat } );
               sendjson($tx);
-           #   return;
+              return;
+          }); #ループ
 
-       #   $tx->finish if ($tx->is_websocket);
-          }); #ua
+          $tx->finish if ($tx->is_websocket);
 
-   }); # loop
+   }); # ua websocket
+
 #   Mojo::IOLoop->start unless Mojo::IOLoop->is_running;
 $cv->recv;
+
 
 

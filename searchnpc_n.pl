@@ -18,8 +18,9 @@ use Mojo::JSON qw(encode_json decode_json from_json to_json);
 use DateTime;
 use Math::Trig qw(great_circle_distance rad2deg deg2rad pi);
 use Clone qw(clone);
-
 use Mojo::IOLoop::Delay;
+use EV;
+use AnyEvent;
 
 $| = 1;
 
@@ -270,9 +271,13 @@ my @keyword = ( "コンビニ",
       }
 
 #ループ処理 websocketも再接続される 10secで更新に変更 追いかけっこしない想定なら60秒も有り
-    Mojo::IOLoop->recurring(
-                     10 => sub {
-                           my $loop = shift;
+ #   Mojo::IOLoop->recurring(
+ #                    10 => sub {
+ #                          my $loop = shift;
+my $cv = AE::cv;
+my $t = AnyEvent->timer( after => 10,
+                         interval => 10,
+                         cb => sub {
 
                            $lifecount--;
                            if ( $lifecount == 0 ) {
@@ -780,7 +785,8 @@ sub sendchatobj {
 
    }); # ua websocket
 
-   Mojo::IOLoop->start unless Mojo::IOLoop->is_running;
+#   Mojo::IOLoop->start unless Mojo::IOLoop->is_running;
+$cv->recv;
 
 
 

@@ -438,9 +438,11 @@ npcinit();
                   undef $dt;
     } # foreach $npcuser_stat
 
-##ループ処理 
-#while (1) {
-
+    my $cv = AE::cv;
+    my $t = AnyEvent->timer(
+            after => 10,
+            interval => 10,
+               cb => sub {
 
 # redis lisner  get_gacclist!!
   $redis->get("GACC$ghostmanid", sub{
@@ -458,30 +460,8 @@ npcinit();
                              undef $debug; 
                          }
                     });
-
-                $redis->keys("Maker*", sub {
-                                  my $result = shift;
-                                       if (defined $result) {
-                                       foreach my $akey (@$result){
-                                           $redis->get($akey,sub { 
-                                                      my $result = shift;
-                                                         if ( ! defined $result ){ 
-                                                                      @makeracclist = ();
-                                                                      return;
-                                                                  }
-                                         my $makeracc = from_json($result);
-                                         push (@makeracclist,$makeracc);                                   
-                                         undef $makeracc;
-                                }); 
-                              } # foreach
-                          } 
-                     }); 
-
-    my $cv = AE::cv;
-    my $t = AnyEvent->timer(
-            after => 10,
-            interval => 10,
-               cb => sub {
+  # Maker get
+  my $getMaker = $redis->keys("Maker*");
 
         Loging("------------------------------LOOP START-----------------------------------");
 
@@ -501,14 +481,7 @@ npcinit();
 
         npcinit();
 
- #アカウント配列のループ    ########################################
-        foreach my $npcuser_stat (@$run_gacclist){
-
-undef @makerlist;
-undef @pointlist;
-undef $pointlist;
-undef $targetlist;
-undef $targets;
+undef @makerlist; #makerチェックは１０秒ループで１回なので、アカウントループの外で初期化
 
      #redisで攻撃判定の受信
      # 以下redisイベント受信時の処理
@@ -595,6 +568,14 @@ undef $targets;
                $AECV->send;
                $AECV->recv;
 
+ #アカウント配列のループ    ########################################
+        foreach my $npcuser_stat (@$run_gacclist){
+
+undef @pointlist;
+undef $pointlist;
+undef $targetlist;
+undef $targets;
+
          # 共有変数へ、値をリンク
             $username = $npcuser_stat->{name};
             $userid = $npcuser_stat->{userid};
@@ -635,25 +616,41 @@ undef $targets;
                              next; # foreach $npcuser_stat
                              }
 
-           my $asyncv = AE::cv;
-
            # mongo3.2用 3000m以内のデータを返す
            my $geo_points_cursole = $timelinecoll->query({ geometry => {
                                                            '$nearSphere' => {
                                                            '$geometry' => {
-                                                            type => "point",
+                                                                type => "point",
                                                                 "coordinates" => [ $npcuser_stat->{loc}->{lng} , $npcuser_stat->{loc}->{lat} ]},
                                                            '$minDistance' => 0,
                                                            '$maxDistance' => 3000
                                      }}});
            @pointlist = $geo_points_cursole->all; # 原則重複無しの想定
 
-           $asyncv->send(@pointlist);
-
-           $asyncv->recv;
-
            #makerをredisから抽出して、距離を算出してリストに加える。
            #  my @makerkeylist = $redis->keys("Maker*");  #以下に置き換え
+
+                       $getMaker->cb(sub {
+                                   my @cv = @_;
+                                   undef @makeracclist;
+                                   my ($result, $err) = $cv[0]->recv;
+                                       if (defined $result) {
+                                       foreach my $akey (@$result){
+                                           $redis->get($akey,sub { 
+                                                      my $result = shift;
+                                                         if ( ! defined $result ){ 
+                                                                      @makeracclist = ();
+                                                                    Loging("DEBUG: CLEAR makeracclist#####");
+                                                                      return;
+                                                                  }
+                                       Loging("DEBUG: GET makeracclist");
+                                         my $makeracc = from_json($result);
+                                         push (@makeracclist,$makeracc);                                   
+                                         undef $makeracc;
+                                }); 
+                              } # foreach
+                          } 
+                     }); 
 
              foreach my $makerpoint (@makeracclist) {
            #  foreach my $aline (@makerkeylist) {
@@ -672,12 +669,12 @@ undef $targets;
                       if ( $t_dist < 3000) {
                        push (@makerlist, $makerpoint );
                        }
-                      undef $makerpoint;
+                   #   undef $makerpoint;
                       undef @s_p;
                       undef @t_p;
                       undef $t_dist;
                      } # if defined makerpoint
-                   }
+                   } # foreach makerpoint
 
                    # makerとメンバーリストを結合する
                    push (@pointlist,@makerlist);
@@ -766,7 +763,7 @@ undef $targets;
       #   Loging("DB responce! $npcuser_stat->{status}");
           #  $pointlist = $hash->{pointlist};
             $pointlist = \@pointlist;
-            weaken($pointlist);
+          #  weaken($pointlist);
             $targetlist = $pointlist;
 
           #  undef $hash;
@@ -1763,5 +1760,4 @@ undef $geo_points_cursole;
     #   $cv->send;  # never end loop
        });  # AnyEvent CV 
     $cv->recv;
-#} #while  AnyEvnt  
 

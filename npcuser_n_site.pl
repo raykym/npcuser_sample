@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 
 #
-# npcuser_n.pl [email] [emailpass] {lat} {lng} {mode}
+# npcuser_n_site.pl [email] [emailpass] {lat} {lng} {mode}
 # email passwordは必須
 # websocket1個でchatまで対応した版
 # 緯度経度の限界処理追加
@@ -26,7 +26,7 @@ $| = 1;
 # npcuser用モジュール
 
 if ( $#ARGV < 1 ) {
-    say "npcuser_f.pl [email] [emailpass] {lat} {lng} {mode}";
+    say "npcuser_n_site.pl [email] [emailpass] {lat} {lng} {mode}";
     exit;
 }
 
@@ -245,21 +245,13 @@ my $oncerun = "true";
       }
 
 #ループ処理 websocketも再接続される 
+#    Mojo::IOLoop->recurring(
+#                     10 => sub {
+#                           my $loop = shift;
 my $cv = AE::cv;
-my $w = AnyEvent->signal( signal => 'TERM',
-                          cb => sub {
-                                $cv->send;
-                               });
-
-
-# websocketでの位置情報送受信
-  $ua->websocket('wss://www.backbone.site/walkworld' => sub {
-    my ($ua,$tx) = @_;
-
-    # internal loop
-    Mojo::IOLoop->recurring(
-                     10 => sub {
-                           my $loop = shift;
+my $t = AnyEvent->timer( after => 10,
+                         interval => 10,
+                         cb => sub {
 
                            $lifecount--;
                            if ( $lifecount == 0 ) {
@@ -268,6 +260,9 @@ my $w = AnyEvent->signal( signal => 'TERM',
                              }
     Loging("lifecount: $lifecount");
 
+# websocketでの位置情報送受信
+  $ua->websocket('wss://www.backbone.site/walkworld' => sub {
+    my ($ua,$tx) = @_;
 
     $tx->on(json => sub {
         my ($tx,$hash) = @_;
@@ -1041,11 +1036,11 @@ sub sendchatobj {
               sendjson($tx);
               return;
 
-             }); # internal loop
+             }); # ua
 
-   Mojo::IOLoop->start unless Mojo::IOLoop->is_running;
+          $tx->finish if ($tx->is_websocket);  # websocket eternal
 
-          });   #ua
-        #  $tx->finish if ($tx->is_websocket);  # websocket eternal
-
+          });   # loop
+#   Mojo::IOLoop->start unless Mojo::IOLoop->is_running;
 $cv->recv;
+
