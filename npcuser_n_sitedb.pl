@@ -589,32 +589,32 @@ undef $targets;
           #  undef $debug;
 
 
-             Loging("LIFECOUNT: $npcuser_stat->{lifecount}");
+          #   Loging("LIFECOUNT: $npcuser_stat->{lifecount}");
                        #    $npcuser_stat->{lifecount}--;     # コメントアウトしている間は無期限稼働、メモリーリークは回避しているので。。。
-                           if ( $npcuser_stat->{lifecount} <= 0 ) {
-                             Loging("時間切れで終了...");
+                       #    if ( $npcuser_stat->{lifecount} <= 0 ) {
+                       #      Loging("時間切れで終了...");
 
-                             my @list = @$run_gacclist;
-                             for (my $i=0; $i <= $#list ; $i++){
-                                 if ( $list[$i]->{userid} eq $npcuser_stat->{userid}){
-                                     $timelinecoll->delete_many({"userid" => "$npcuser_stat->{userid}"}); # mognodb3.2
-                                     splice(@$run_gacclist,$i,1);
-                                 } 
-                             } # for
+                       #      my @list = @$run_gacclist;
+                       #      for (my $i=0; $i <= $#list ; $i++){
+                       #          if ( $list[$i]->{userid} eq $npcuser_stat->{userid}){
+                       #              $timelinecoll->delete_many({"userid" => "$npcuser_stat->{userid}"}); # mognodb3.2
+                       #              splice(@$run_gacclist,$i,1);
+                       #          } 
+                       #      } # for
 
                              # redisへの更新
-                             my $run_json = to_json($run_gacclist);
-                             $redis->set("GACC$ghostmanid" => $run_json);
-                             $redis->expire("GACC$ghostmanid" , 32 ); #32秒保持する
+                       #      my $run_json = to_json($run_gacclist);
+                       #      $redis->set("GACC$ghostmanid" => $run_json);
+                       #      $redis->expire("GACC$ghostmanid" , 32 ); #32秒保持する
 
-                             if ( !@$run_gacclist) {
-                                 # 空なら終了
-                                 exit; 
-                                 }
-                             undef @list;
-                             undef $run_json;
-                             next; # foreach $npcuser_stat
-                             }
+                       #      if ( !@$run_gacclist) {
+                       #          # 空なら終了
+                       #          exit; 
+                       #          }
+                       #      undef @list;
+                       #      undef $run_json;
+                       #      next; # foreach $npcuser_stat
+                       #      }
 
            # mongo3.2用 3000m以内のデータを返す
            my $geo_points_cursole = $timelinecoll->query({ geometry => {
@@ -1217,12 +1217,23 @@ undef $geo_points_cursole;
                          }
                          push(@$targets,$i);
                      }
+                #NPC以外のターゲットリスト
+                     my @nonnpc_targets = ();
+                     for my $i (@$targetlist){
+                         if ( $i->{category} eq "NPC" ){
+                         next;
+                         }
+                         push(@nonnpc_targets,$i);
+                     }
 
              # CHECK
              my @chk_targets = @$targets;
              Loging("DEBUG: runaway Targets $#chk_targets ");
 
              if (($target eq "")&&($#chk_targets != -1)) {
+
+                  if ( $#chk_targets >= 20 ){
+                     # 無差別にターゲットを決定して、行動する
                      my @t_list = @$targets; 
                      my $lc = $#t_list;
                      my $tnum = int(rand($lc));
@@ -1232,7 +1243,19 @@ undef $geo_points_cursole;
                      undef @t_list;
                      undef $lc;
                      undef $tnum;
-                }
+
+                    } elsif ($#nonnpc_targets != -1 ){
+                      # ターゲットが20以下の場合nonnpc_targetsから選択
+                      my $lc = $#nonnpc_targets;
+                      my $tnum = int(rand($lc));
+                      $target = $nonnpc_targets[$tnum]->{userid};
+                      $npcuser_stat->{target} = $target;
+                      Loging("RUNAWAY target: $target : $lc : $tnum : $nonnpc_targets[$tnum]->{name}"); 
+                      undef $lc;
+                      undef $tnum;
+                    }
+
+                } # if target="" chk_targets != -1
 
              #ターゲットステータスの抽出
              foreach my $t_p (@$targets){
