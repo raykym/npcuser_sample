@@ -412,45 +412,31 @@ sub writechatobj {
 
 # main ###############
 
-#get_gacclist(); # AE 以下に変更
+#get_gacclist(); # AE
 
-  $redis->get("GACC$ghostmanid", sub{
-                     my $result = shift;
+# $gacclistと実行中のリストの分岐、 アカウントの削除は自前で追加のみチェックする
+   # 差分が在れば追加
+ #  foreach my $acc (@$gacclist){
+ #              push(@$run_gacclist,$acc) unless grep { $_->{name} =~ $acc->{name} } @$run_gacclist;
+ #          }
+ #  my $debug = to_json($run_gacclist);
+ #  Loging("run_gacclist: $debug");
+ #  undef $debug;
 
-                        if ( ! defined $result) { 
-                                    #   @$gacclist = ();
-                                       Loging("Get Redis in result block PASSED!!!");
-                                       return;
-                           }
-                     $gacclist = from_json($result);
-                     Loging(" REDIS GET "); 
+# redisでgacclistを取得済の想定でnpcinit
+npcinit();
 
-                 foreach my $acc (@$gacclist){
-                       Loging("GET REDIS Check $acc->{name}");
-
-                       if ( ! grep { $_->{userid} eq $acc->{userid} } @$run_gacclist ) {
-                         push(@$run_gacclist,$acc);
-                         my $debug = to_json($acc);
-                         Loging("run_gacclist not match. ");
-                         Loging("run_gacclist add: $debug");
-                         undef $debug; 
-                         } # if grep
-                     }
-
-                     npcinit();
-
-                # 初回マーク処理
-                    foreach my $npcuser_stat (@$run_gacclist){
-                                  my $dt = DateTime->now( time_zone => 'Asia/Tokyo');
-                                  # TTLレコードを追加する。
-                                  $username = $npcuser_stat->{name}; #Logingで利用されるため、設定だけしておく
-                                  $npcuser_stat->{ttl} = DateTime->now();
-                                  $timelinecoll->delete_many({"userid" => $npcuser_stat->{userid}}); # mognodb3.2 削除してから
-                                  $timelinecoll->insert_one($npcuser_stat);
-                                  $timelinelog->insert_one($npcuser_stat);
-                                  undef $dt;
-                            } # foreach $npcuser_stat
-    });  # redis get
+# 初回マーク処理
+    foreach my $npcuser_stat (@$run_gacclist){
+                  my $dt = DateTime->now( time_zone => 'Asia/Tokyo');
+                  # TTLレコードを追加する。
+                  $username = $npcuser_stat->{name}; #Logingで利用されるため、設定だけしておく
+                  $npcuser_stat->{ttl} = DateTime->now();
+                  $timelinecoll->delete_many({"userid" => $npcuser_stat->{userid}}); # mognodb3.2 削除してから
+                  $timelinecoll->insert_one($npcuser_stat);
+                  $timelinelog->insert_one($npcuser_stat);
+                  undef $dt;
+    } # foreach $npcuser_stat
 
     my $cv = AE::cv;
     my $t = AnyEvent->timer(
@@ -460,47 +446,50 @@ sub writechatobj {
 
         Loging("------------------------------LOOP START-----------------------------------");
 
-#        Loging("run_gacclist name list --------");
-#        foreach my $i (@$run_gacclist){
-#           print "$i->{name}";
-#           print " ";
-#        }
-#        print "\n";
-#        Loging("run_gacclist list END  --------");
-#
-#        Loging("gacclist name list --------");
-#        foreach my $i (@$gacclist){
-#           print "$i->{name}";
-#           print " ";
-#        }
-#        print "\n";
-#        Loging("gacclist list END  --------");
+        Loging("run_gacclist name list --------");
+        foreach my $i (@$run_gacclist){
+           print "$i->{name}";
+           print " ";
+        }
+        print "\n";
+        Loging("run_gacclist list END  --------");
+
+        Loging("gacclist name list --------");
+        foreach my $i (@$gacclist){
+           print "$i->{name}";
+           print " ";
+        }
+        print "\n";
+        Loging("gacclist list END  --------");
 
 # redis lisner  get_gacclist!!
   $redis->get("GACC$ghostmanid", sub{
                      my $result = shift;
 
                         if ( ! defined $result) { 
-                                    #   @$gacclist = ();
+                                       @$gacclist = ();
                                        Loging("Get Redis in result block PASSED!!!");
                                        return;
                            }
                      $gacclist = from_json($result);
+
                      Loging(" REDIS GET "); 
 
                  foreach my $acc (@$gacclist){
                        Loging("GET REDIS Check $acc->{name}");
 
-                       if ( ! grep { $_->{userid} eq $acc->{userid} } @$run_gacclist ) {
-                         push(@$run_gacclist,$acc);
+                    #   if ( ! grep { $_->{userid} eq $acc->{userid} } @$run_gacclist ) {
+                         push(@$run_gacclist,$acc) unless grep { $_->{userid} eq $acc->{userid} } @$run_gacclist;
+                    #     push(@$run_gacclist,$acc);
                          my $debug = to_json($acc);
-                         Loging("run_gacclist not match. ");
-                         Loging("run_gacclist add: $debug");
+                         Loging("run_gacclist add: $debug") unless grep { $_->{userid} eq $acc->{userid} } @$run_gacclist;
+                    #     Loging("run_gacclist not match. ");
+                    #     Loging("run_gacclist add: $debug");
                          undef $debug; 
-                         } # if grep
+                    #     } # if grep
                      }
 
-                 #   });   # 10secの末尾に移動 全ての処理はredisのサブルーチン内で処理する
+                    });
 
   # Maker get
   my $getMaker = $redis->keys("Maker*");
@@ -564,20 +553,11 @@ undef @makerlist; #makerチェックは１０秒ループで１回なので、�
                                      last;
                                     } 
                                 }
-                                    @list = @$gacclist;
-                                 for (my $i=0; $i <= $#list ; $i++){
-                                     if ( $list[$i]->{userid} eq $messobj->{to}){
-                                      splice(@$gacclist,$i,1);  
-                                      Loging("trap HIT gacclist drop $list[$i]->{name}");
-                                      last;
-                                     }
-                                 } # for
 
                                 # redisへの更新
                                 my $run_json = to_json($run_gacclist);
                                 $redis->set("GACC$ghostmanid" => $run_json);
                                 $redis->expire("GACC$ghostmanid" , 32 ); #32秒保持する
-                                Loging("REDIS SET Attack check!!!");
                                 undef $run_json;
                                 undef @list;
 
@@ -796,7 +776,7 @@ undef $targets;
                                 @list = @$gacclist;
                              for (my $i=0; $i <= $#list ; $i++){
                                  if ( $list[$i]->{userid} eq $npcuser_stat->{userid}){
-                                  splice(@$gacclist,$i,1);  
+                                  splice(@$gacclist,$i,1); 
                                   Loging("trap HIT gacclist drop $list[$i]->{name}");
                                   last;
                                  }
@@ -815,8 +795,8 @@ undef $targets;
                              undef @list;
                              undef $run_json;
                              undef $dt;
-
-                             next;  # アカウント消滅なので次へ
+                        #     undef $ttl;
+                             next;
                } # if trapevents
 
 
@@ -1824,13 +1804,54 @@ undef $geo_points_cursole;
       } #foreach $run_gacclist   ######################################################
       # 以上は10秒毎に実行されるアカウントループ
 
-      });  # redis sub
+        Loging("run_gacclist name list --------");
+        foreach my $i (@$run_gacclist){
+           print "$i->{name}";
+           print " ";
+        }
+        print "\n";
+        Loging("run_gacclist list END  --------");
+
+        Loging("gacclist name list --------");
+        foreach my $i (@$gacclist){
+           print "$i->{name}";
+           print " ";
+        }
+        print "\n";
+        Loging("gacclist list END  --------");
+
+# redis 書き込み前にチェックしないと追加アカウントを認識出来ない
+  $redis->get("GACC$ghostmanid", sub{
+                     my $result = shift;
+                        if ( ! defined $result) { 
+                                       @$gacclist = ();
+                                       return;
+                                               }
+                     $gacclist = from_json($result);
+
+                     Loging("REDIS GET after 10");
+
+                     foreach my $acc (@$gacclist){
+                          #  Loging("GET REDIS Check after 10 $acc->{name}");
+
+                       #     if ( ! grep { $_->{name} eq $acc->{name} } @$run_gacclist ) {
+                             push(@$run_gacclist,$acc) unless grep { $_->{userid} eq $acc->{userid} } @$run_gacclist;
+                       #      push(@$run_gacclist,$acc);
+                             my $debug = to_json($acc);
+                             Loging("run_gacclist add: $debug") unless grep { $_->{userid} eq $acc->{userid} } @$run_gacclist;
+                       #      Loging("run_gacclist not match. ");
+                       #      Loging("run_gacclist add: $debug");
+                             undef $debug; 
+                       #      } # if grep
+                         }
+                    });  # redis
 
      # redis 書き込み
      my $run_json = to_json($run_gacclist);
         $redis->set("GACC$ghostmanid" => $run_json);
         $redis->expire("GACC$ghostmanid" , 32 ); #32秒保持する
         undef $run_json;
+
         Loging("SET REDIS WRITE finish");
 
 #   my  $psize = total_size(\%main::);
