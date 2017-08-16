@@ -114,7 +114,7 @@ my $username = "";
 my $userid = "";
 
 my $ghostmanid = "$ARGV[0]";
-   if ( !defined $ghostmanid ) {
+   if (( ! defined $ghostmanid )||($ghostmanid eq "")) {
         Loging("UNDEFINED ghostmanid!!!!!!!");
         exit;
        }
@@ -207,6 +207,7 @@ sub npcinit {
         $acc->{point_spn} = 0.0002 if ( $acc->{point_spn} eq "");
         $acc->{lifecount} = 60480 if ( $acc->{lifecount} eq "");
         $acc->{icon_url} = iconchg($acc->{status}) if ($acc->{icon_url} eq "");
+        $acc->{chasecnt} = 0 if ( ! defined $acc->{chasecnt} );
 
      #   my $debug = to_json($acc);
      #   Loging("para init: $debug");
@@ -480,6 +481,8 @@ sub writechatobj {
   $redis->get("GACC$ghostmanid", sub{
                      my $result = shift;
 
+                        Loging("redis get start point ---------------------------------");
+
                         if ( ! defined $result) { 
                                     #   @$gacclist = ();
                                        Loging("Get Redis in result block PASSED!!!");
@@ -506,8 +509,6 @@ sub writechatobj {
   my $getMaker = $redis->keys("Maker*");
 
         # アカウントリストをチェックして差分を確認する
-        #get_gacclist(); # AE
-
         my @list = @$gacclist;
         if (!@list){
             $nullcount++;
@@ -853,6 +854,17 @@ undef $targets;
 
 undef $geo_points_cursole; 
 
+           # {chasecnt}が１０になると分裂する
+           if ( $npcuser_stat->{chasecnt} == 10 ) {
+              $ua->post('https://www.backbone.site/ghostman/gaccput' => form => { c => "1", lat => "$lat", lng => "$lng" });
+              Loging("SET UNIT ADD!!!!");
+              $txtmsg = "分裂するよ！！！";
+              $txtmsg = encode_utf8($txtmsg);
+              $chatobj->{chat} = $txtmsg;
+              writechatobj($npcuser_stat);
+              $npcuser_stat->{chasecnt} = 0;
+              undef $txtmsg;
+           }
 
              # テスト用　位置保持
              if ( $npcuser_stat->{status} eq "STAY") {
@@ -1019,43 +1031,43 @@ undef $geo_points_cursole;
                         next;
                     }
 
-                #スタート地点からの距離判定
-                # radianに変換
-                my @s_p = NESW($lng, $lat);
-                my @t_p = NESW($s_lng, $s_lat);
-                my $t_dist = great_circle_distance(@s_p,@t_p,6378140);
-                undef @s_p;
-                undef @t_p;
-
-                Loging("mode Random: $t_dist");
-
-                spnchange($t_dist);
-
-                # スタート地点から2km離れて、他に稼働するものがあれば、
-                if ($t_dist > 2000 ){
-
-                     @$targets = ();
-                     #自分をリストから除外する
-                     for my $i (@$targetlist){
-                         if ( $i->{userid} eq $npcuser_stat->{userid}){
-                         next;
-                         }
-                         push(@$targets,$i);
-                     }
-
-                     my @t_list = @$targets;
-                     if ( $#t_list > 2 ){
-                        $npcuser_stat->{status} = "chase";
-                        Loging("Mode change Chase!");
-                        my $txtmsg  = "追跡モードになったよ！";
-                           $txtmsg = encode_utf8($txtmsg);
-                        $chatobj->{chat} = $txtmsg;
-                     #   writechatobj($npcuser_stat);
-                        undef @t_list;
-                        next;
-                        }
-                     undef @t_list;
-                }  # t_dist > 2000 
+       #         #スタート地点からの距離判定
+       #         # radianに変換
+       #         my @s_p = NESW($lng, $lat);
+       #         my @t_p = NESW($s_lng, $s_lat);
+       #         my $t_dist = great_circle_distance(@s_p,@t_p,6378140);
+       #         undef @s_p;
+       #         undef @t_p;
+       #
+       #         Loging("mode Random: $t_dist");
+       #
+       #         spnchange($t_dist);
+       #
+       #         # スタート地点から2km離れて、他に稼働するものがあれば、
+       #         if ($t_dist > 2000 ){
+       #
+       #              @$targets = ();
+       #              #自分をリストから除外する
+       #              for my $i (@$targetlist){
+       #                  if ( $i->{userid} eq $npcuser_stat->{userid}){
+       #                  next;
+       #                  }
+       #                  push(@$targets,$i);
+       #              }
+       #
+       #              my @t_list = @$targets;
+       #              if ( $#t_list > 2 ){
+       #                 $npcuser_stat->{status} = "chase";
+       #                 Loging("Mode change Chase!");
+       #                 my $txtmsg  = "追跡モードになったよ！";
+       #                    $txtmsg = encode_utf8($txtmsg);
+       #                 $chatobj->{chat} = $txtmsg;
+       #              #   writechatobj($npcuser_stat);
+       #                 undef @t_list;
+       #                 next;
+       #                 }
+       #              undef @t_list;
+       #         }  # t_dist > 2000 
 
               writejson($npcuser_stat);
               undef @chk_targets; 
@@ -1212,6 +1224,7 @@ undef $geo_points_cursole;
 
               # 5m以下に近づくとモードを変更
               if ($t_dist < 5 ) {
+                 $npcuser_stat->{chasecnt} = ++$npcuser_stat->{chasecnt};
                  $npcuser_stat->{status} = "round"; 
                  $target = "";
                  $npcuser_stat->{target} = "";
@@ -1356,6 +1369,9 @@ undef $geo_points_cursole;
                  $target = ""; 
                  $npcuser_stat->{target} = ""; 
                  Loging("Mode Change........radom.");
+                 # trap での自爆を避けるために少しずらす
+                 $lat = $lat + 0.0001;
+                 writejson($npcuser_stat);
                  my $txtmsg  = "Randomモードになったよ！";
                     $txtmsg = encode_utf8($txtmsg);
                  $chatobj->{chat} = $txtmsg;
@@ -1824,14 +1840,15 @@ undef $geo_points_cursole;
       } #foreach $run_gacclist   ######################################################
       # 以上は10秒毎に実行されるアカウントループ
 
-      });  # redis sub
-
      # redis 書き込み
      my $run_json = to_json($run_gacclist);
         $redis->set("GACC$ghostmanid" => $run_json);
         $redis->expire("GACC$ghostmanid" , 32 ); #32秒保持する
         undef $run_json;
         Loging("SET REDIS WRITE finish");
+
+        Loging("redis get end point ---------------------------------");
+      });  # redis sub
 
 #   my  $psize = total_size(\%main::);
 #   Loging("main: $psize");
