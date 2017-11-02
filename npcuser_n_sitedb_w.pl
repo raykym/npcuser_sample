@@ -1,5 +1,6 @@
 #!/usr/bin/env perl
 
+# westwind用ヴァージョン
 # site1を経由せずDBへ直接書き込みバージョン
 # アカウント情報はredisから受け取り、個々の処理を行って、mongodb、redisへ位置情報を書き戻す
 # 終了処理も此処で行い、mongodbとredisへ送信する
@@ -41,12 +42,12 @@ use Sessionid;
 $| = 1;
 
 # DB設定
-my $mongoclient = MongoDB->connect('mongodb://dbs-1:27017');
+my $mongoclient = MongoDB->connect('mongodb://westwind:27017');
 #my $mango = Mango->new('mongodb://dbs-1:27017'); 
 
 #一般コマンド用
 my $redis = AnyEvent::Redis->new(
-    host => 'dbs-1',
+    host => '10.140.0.6',
     port => 6379,
     encoding => 'utf8',
     on_error => sub { warn @_ },
@@ -55,7 +56,7 @@ my $redis = AnyEvent::Redis->new(
 
 #subscribe用
 my $redisAE = AnyEvent::Redis->new(
-    host => 'dbs-1',
+    host => '10.140.0.6',
     port => 6379,
     encoding => 'utf8',
     on_error => sub { warn @_ },
@@ -540,7 +541,7 @@ undef @makerlist; #makerチェックは１０秒ループで１回なので、�
      #redis receve subscribe
      my $AECV = $redisAE->subscribe($attackCH , sub {
                   my ($mess,$channel) = @_;
-                      Loging("DEBUG: on channel: $mess");
+                      Loging("DEBUG: on channel: $channel | $mess");
 
                       if ( $channel ne $attackCH ) { 
                                           undef $mess;
@@ -1894,9 +1895,7 @@ undef $geo_points_cursole;
         Loging("SET REDIS WRITE finish");
 
         Loging("redis get end point ---------------------------------");
-      });  # redis sub
 
-    nullcheckgacc();
 
 #   my  $psize = total_size(\%main::);
 #   Loging("main: $psize");
@@ -1920,5 +1919,9 @@ undef $geo_points_cursole;
 
     #   $cv->send;  # never end loop
        });  # AnyEvent CV 
+
+      });  # redis sub
+    nullcheckgacc();
+
     $cv->recv;
 
