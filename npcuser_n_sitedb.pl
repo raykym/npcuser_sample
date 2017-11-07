@@ -44,6 +44,8 @@ $| = 1;
 my $mongoclient = MongoDB->connect('mongodb://dbs-1:27017');
 #my $mango = Mango->new('mongodb://dbs-1:27017'); 
 
+my $server = "www.backbone.site";
+
 #一般コマンド用
 my $redis = AnyEvent::Redis->new(
     host => 'dbs-1',
@@ -868,7 +870,7 @@ undef $geo_points_cursole;
 
            # {chasecnt}が剰余0になると分裂する chasecntが0は除外する 連続しないために1割の確率を付与する
            if ( ($npcuser_stat->{chasecnt} % 100 == 0) && ($npcuser_stat->{chasecnt} != 0) && ( int(rand(1000)) <= 100 ) ) {
-              $ua->post('https://www.backbone.site/ghostman/gaccput' => form => { c => "1", lat => "$lat", lng => "$lng" });
+              $ua->post("https://$server/ghostman/gaccput" => form => { c => "1", lat => "$lat", lng => "$lng" });
               Loging("SET UNIT ADD!!!!");
               $txtmsg = "分裂するよ！！！";
               $txtmsg = encode_utf8($txtmsg);

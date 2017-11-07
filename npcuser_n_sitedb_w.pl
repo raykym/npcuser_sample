@@ -45,6 +45,8 @@ $| = 1;
 my $mongoclient = MongoDB->connect('mongodb://westwind:27017');
 #my $mango = Mango->new('mongodb://dbs-1:27017'); 
 
+my $server = "westwind.backbone.site";
+
 #一般コマンド用
 my $redis = AnyEvent::Redis->new(
     host => '10.140.0.6',
@@ -431,8 +433,149 @@ sub nullcheckgacc {
         undef @list;
         }
 
+sub d_correction {
+    # rundirectへの補正を検討する   d_correction($npcuser_stat,$rundirect,@pointlist); で利用する
+    # 共通変数$lat $lngへ直接補正を行う
+    my ( $npcuser_stat, $rundirect, @pointlist ) = @_;
 
-# main ###############
+    Loging("DEBUG: d_correction: in: $rundirect");
+
+    # 空なら0を返す
+    if (! @pointlist){
+        Loging("DEBUG: d_correction: out: $rundirect");
+        return;
+    }
+
+    my @userslist;
+
+    #自分を除外
+    for my $i (@pointlist){
+        if ( $i->{userid} eq $npcuser_stat->{userid}){
+           next;
+           }
+        push(@userslist,$i);
+    }
+
+    # USERが居ない場合
+    if (! @userslist){
+       Loging("DEBUG: d_correction: out: $rundirect");
+       return;
+    }
+
+    # 追跡ターゲットが設定されていた場合
+    if ( $npcuser_stat->{target} ){
+        for (my $i=0; $i <= $#userslist; $i++){
+            if ( $pointlist[$i]->{userid} eq $npcuser_stat->{target} ){
+                 Loging("DROP userslist: $userslist[$i]->{name} ");
+                 splice(@userslist,$i,1);
+                 last;
+            }
+        } # for
+    } # if
+
+   my @usersdirect;
+
+   # 距離と方角を計算する 距離が50m以下のみを抽出
+   for my $i (@userslist){
+
+              #直径をかけてメートルになおす lat lngの位置に注意
+              my @s_p = NESW($lng, $lat);
+              my @t_p = NESW($i->{loc}->{lng}, $i->{loc}->{lat});
+              my $t_dist = great_circle_distance(@s_p,@t_p,6378140);
+              my $t_direct = geoDirect($lat, $lng, $i->{loc}->{lat}, $i->{loc}->{lng});
+
+              my $dist_direct = { "dist" => $t_dist, "direct" => $t_direct };
+              push(@usersdirect,$dist_direct) if ($t_dist < 50);    
+   }
+
+   # 50m以内に居ない
+   if (! @usersdirect) {
+       Loging("DEBUG: d_correction: out: $rundirect");
+       return;
+   }
+   
+   for my $i (@usersdirect){
+       
+       my $cul_direct = $rundirect - $i->{direct};
+
+       if ( ($cul_direct > 45 ) || ($cul_direct < -45)){
+          # 進行方向左右45度以外(補正範囲外）
+          Loging("DEBUG: d_correction: out: $rundirect");
+          return;
+       }
+
+       if (( $cul_direct < 45 ) && ( $cul_direct > 0)) {
+          # 補正左に45度
+          $rundirect = $rundirect - 45;
+          if ($rundirect < 0 ) {
+             $rundirect = 360 + $rundirect;
+          } 
+          Loging("DEBUG: d_correction: out: $rundirect");
+
+          # lat lngへの補正
+          latlng_correction($rundirect);
+          return;
+       }
+       if (( $cul_direct > -45 ) && ( $cul_direct < 0 )) {
+          # 補正右に45度
+          $rundirect = $rundirect + 45;
+          if ($rundirect > 360){
+             $rundirect = 360 - $rundirect;
+          }
+          Loging("DEBUG: d_correction: out: $rundirect");
+
+          # lat lngへの補正
+          latlng_correction($rundirect);
+          return;
+       }
+   } # for
+   Loging("DEBUG: d_correction: out: $rundirect");
+   return;  # 念のため
+} # d_crrection
+
+
+sub latlng_correction {
+    # d_correction用に補正したrundirectからlat or lngのどちらに補正するか判定する
+    # 45度単位で分割して補正する
+    my $rundirect = shift;
+
+    if ( geoarea($lat,$lng) == 1 ){
+        # 東経北緯
+        if (( $rundirect > 315 )||( $rundirect < 45 )){
+             # 北方向へ補正
+             $lat = $lat + 0.0001;
+             $lat = overArealat($lat);
+             Loging("DEBUG: lat+ correction");
+           } elsif (($rundirect > 45 ) || ( $rundirect < 135)){
+             # 東方向へ補正
+             $lng = $lng + 0.0001;
+             $lng = overArealng($lng);
+             Loging("DEBUG: lng+ correction");
+           } elsif (( $rundirect > 135 ) || ( $rundirect < 225 )){
+             # 南方向へ補正
+             $lat = $lat - 0.0001;
+             $lat = overArealat($lat);
+             Loging("DEBUG: lat- correction");
+           } elsif (( $rundirect > 225 ) || ( $rundirect < 315 )) {
+             # 西方向へ補正
+             $lng = $lng - 0.0001;
+             $lng = overArealng($lng);
+             Loging("DEBUG: lng- correction");
+           }
+       } elsif ( geoarea($lat,$lng) == 2) {
+       # 西経北緯 
+
+       } elsif ( geoarea($lat,$lng) == 3) {
+       # 東経南緯
+
+       } elsif ( geoarea($lat,$lng) == 4) {
+       # 西経南緯
+       
+       }
+}
+
+
+##### main
 
 #get_gacclist(); # AE 以下に変更
 
@@ -869,7 +1012,7 @@ undef $geo_points_cursole;
 
            # {chasecnt}が剰余0になると分裂する chasecntが0は除外する 連続しないために1割の確率を付与する
            if ( ($npcuser_stat->{chasecnt} % 100 == 0) && ($npcuser_stat->{chasecnt} != 0) && ( int(rand(1000)) <= 100 ) ) {
-              $ua->post('https://www.backbone.site/ghostman/gaccput' => form => { c => "1", lat => "$lat", lng => "$lng" });
+              $ua->post("https://$server/ghostman/gaccput" => form => { c => "1", lat => "$lat", lng => "$lng" });
               Loging("SET UNIT ADD!!!!");
               $txtmsg = "分裂するよ！！！";
               $txtmsg = encode_utf8($txtmsg);
@@ -1004,6 +1147,8 @@ undef $geo_points_cursole;
 
                 } # geoarea if
 
+                # 補正
+                d_correction($npcuser_stat,$rundirect,@pointlist);
 
                 # モード変更チェック 
 
@@ -1269,6 +1414,9 @@ undef $geo_points_cursole;
 
               } # geoarea if
 
+                # 補正
+                d_correction($npcuser_stat,$rundirect,@pointlist);
+
               # 5m以下に近づくとモードを変更
               if ($t_dist < 5 ) {
                  $npcuser_stat->{chasecnt} = ++$npcuser_stat->{chasecnt};
@@ -1303,7 +1451,7 @@ undef $geo_points_cursole;
               # 確立で諦める
               if (($npcuser_stat->{status} eq "chase" ) && ( int(rand(100)) == $npcuser_stat->{chasecnt} )) {
 
-                 # rundomモードへ変更
+                 # randomモードへ変更
                         $npcuser_stat->{status} = "random";
                         Loging("Mode change random!");
                         writejson($npcuser_stat);
@@ -1508,6 +1656,9 @@ undef $geo_points_cursole;
 
               } # geoarea if
 
+              # 補正
+              d_correction($npcuser_stat,$rundirect,@pointlist);
+
               #ターゲットが規定以下の場合は
               if (($#chk_targets < 20) && (int(rand(50) > 45))) {
                         $npcuser_stat->{status} = "round";
@@ -1682,6 +1833,9 @@ undef $geo_points_cursole;
 
               } # geoarea if
 
+              # 補正
+              d_correction($npcuser_stat,$rundirect,@pointlist);
+
               if ( int(rand(100)) > 90 ) {
                  $npcuser_stat->{status} = "random"; 
                  $target = "";
@@ -1840,6 +1994,9 @@ undef $geo_points_cursole;
 
                 } # geoarea if
 
+                # 補正
+                d_correction($npcuser_stat,$rundirect,@pointlist);
+
                 my @s_p = NESW($lng, $lat);
                 my @t_p = NESW($npcuser_stat->{place}->{lng}, $npcuser_stat->{place}->{lat});
                 my $t_dist = great_circle_distance(@s_p,@t_p,6378140);
@@ -1896,6 +2053,9 @@ undef $geo_points_cursole;
 
         Loging("redis get end point ---------------------------------");
 
+      });  # redis sub
+
+    nullcheckgacc();
 
 #   my  $psize = total_size(\%main::);
 #   Loging("main: $psize");
@@ -1919,9 +2079,6 @@ undef $geo_points_cursole;
 
     #   $cv->send;  # never end loop
        });  # AnyEvent CV 
-
-      });  # redis sub
-    nullcheckgacc();
 
     $cv->recv;
 
