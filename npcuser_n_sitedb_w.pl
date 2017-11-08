@@ -456,13 +456,13 @@ sub d_correction {
         push(@userslist,$i);
     }
 
-    # USERが居ない場合
+    # UNITが居ない場合
     if (! @userslist){
        Loging("DEBUG: d_correction: out: $rundirect");
        return;
     }
 
-    # 追跡ターゲットが設定されていた場合
+    # 追跡ターゲットが設定されていた場合,ターゲットは回避対象から外す
     if ( $npcuser_stat->{target} ){
         for (my $i=0; $i <= $#userslist; $i++){
             if ( $pointlist[$i]->{userid} eq $npcuser_stat->{target} ){
@@ -986,16 +986,11 @@ undef $targets;
           #  undef $hash;
 
      # Makerがある場合の処理 targetをmakerに変更してstatをchaseに
-        foreach my $poi ( @$pointlist ) {
+       if (@makerlist) {
 
-           if ( $poi->{name} eq "maker" ) {
+           my $spm = int(rand($#makerlist));
 
-              # targetが既にmakerならlast
-              if ( $npcuser_stat->{target} eq $poi->{userid}) { 
-                  last;
-                 } 
-
-              $npcuser_stat->{target} = $poi->{userid};
+              $npcuser_stat->{target} = $makerlist[$spm]->{userid};
               $npcuser_stat->{status} = "chase";
               Loging("Mode change Chase!");
               writejson($npcuser_stat);
@@ -1004,9 +999,8 @@ undef $targets;
            #   $chatobj->{chat} = $txtmsg;
            #   writechatobj($npcuser_stat);
            #   undef $txtmsg;
-              last;
-              } # if
-        }
+
+       } # if @makerlist
 
 undef $geo_points_cursole; 
 
