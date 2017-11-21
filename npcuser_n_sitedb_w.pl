@@ -795,31 +795,31 @@ undef $targets;
 
 
           #   Loging("LIFECOUNT: $npcuser_stat->{lifecount}");
-                       #    $npcuser_stat->{lifecount}--;     # コメントアウトしている間は無期限稼働、メモリーリークは回避しているので。。。
-                       #    if ( $npcuser_stat->{lifecount} <= 0 ) {
-                       #      Loging("時間切れで終了...");
+                           $npcuser_stat->{lifecount}--; 
+                           if ( $npcuser_stat->{lifecount} <= 0 ) {
+                             Loging("時間切れで終了...");
 
-                       #      my @list = @$run_gacclist;
-                       #      for (my $i=0; $i <= $#list ; $i++){
-                       #          if ( $list[$i]->{userid} eq $npcuser_stat->{userid}){
-                       #              $timelinecoll->delete_many({"userid" => "$npcuser_stat->{userid}"}); # mognodb3.2
-                       #              splice(@$run_gacclist,$i,1);
-                       #          } 
-                       #      } # for
+                             my @list = @$run_gacclist;
+                             for (my $i=0; $i <= $#list ; $i++){
+                                 if ( $list[$i]->{userid} eq $npcuser_stat->{userid}){
+                                     $timelinecoll->delete_many({"userid" => "$npcuser_stat->{userid}"}); # mognodb3.2
+                                     splice(@$run_gacclist,$i,1);
+                                 } 
+                             } # for
 
                              # redisへの更新
-                       #      my $run_json = to_json($run_gacclist);
-                       #      $redis->set("GACC$ghostmanid" => $run_json);
-                       #      $redis->expire("GACC$ghostmanid" , 32 ); #32秒保持する
+                             my $run_json = to_json($run_gacclist);
+                             $redis->set("GACC$ghostmanid" => $run_json);
+                             $redis->expire("GACC$ghostmanid" , 32 ); #32秒保持する
 
-                       #      if ( !@$run_gacclist) {
-                       #          # 空なら終了
-                       #          exit; 
-                       #          }
-                       #      undef @list;
-                       #      undef $run_json;
-                       #      next; # foreach $npcuser_stat
-                       #      }
+                             if ( !@$run_gacclist) {
+                                 # 空なら終了
+                                 exit; 
+                                 }
+                             undef @list;
+                             undef $run_json;
+                             next; # foreach $npcuser_stat
+                             }
 
            # mongo3.2用 3000m以内のデータを返す
            my $geo_points_cursole = $timelinecoll->query({ geometry => {
@@ -1004,7 +1004,7 @@ undef $targets;
 
 undef $geo_points_cursole; 
 
-           # {chasecnt}が剰余0になると分裂する chasecntが0は除外する 連続しないために1割の確率を付与する
+           # {chasecnt}が剰余0になると分裂する chasecntが0は除外する 連続しないために10%の確率を付与する
            if ( ($npcuser_stat->{chasecnt} % 100 == 0) && ($npcuser_stat->{chasecnt} != 0) && ( int(rand(1000)) <= 100 ) ) {
               $ua->post("https://$server/ghostman/gaccput" => form => { c => "1", lat => "$lat", lng => "$lng" });
               Loging("SET UNIT ADD!!!!");
@@ -1016,7 +1016,7 @@ undef $geo_points_cursole;
               undef $txtmsg;
            }
 
-           # tower配置処理、chasecntが1000を前提にに確率で配置する
+           # tower配置処理、chasecntが1000を前提にに確率で配置する 乱数がchasecntと一致した場合
            if ( ($npcuser_stat->{chasecnt} == int(rand(1000))) && ( int(rand(1000)) <= 100 ) ) {
 
               # maker固有のuidを設定
@@ -1032,6 +1032,7 @@ undef $geo_points_cursole;
                                      lng => $lng
                                              },
                           name => "maker",
+                          category => "MAKER",
                           userid => $makeruid,
                           status => "Dummy",
                           time => DateTime->now(),
@@ -1278,8 +1279,20 @@ undef $geo_points_cursole;
              my @chk_targets = @$targets;
              Loging("DEBUG: Chase Targets $#chk_targets ");
 
+             # USERの確率を増やす
+             my @uptargets = ();
+             my @targetup = ();
+             for my $i (@$targets){
+                 if ( $i->{category} eq "USER" ){
+                     push(@uptargets,$i);
+                 }
+             }
+             push(@targetup,@uptargets);
+             push(@targetup,@$targets);
+             push(@targetup,@uptargets);
+
              if (($target eq "")&&($#chk_targets > 0)) {
-                     my @t_list = @$targets; 
+                     my @t_list = @targetup; 
                      my $lc = $#t_list;
                      my $tnum = int(rand($lc));
                      $target = $t_list[$tnum]->{userid};
@@ -1348,9 +1361,9 @@ undef $geo_points_cursole;
               # 追跡は速度を多めに設定 50m以上離れている場合は高速モード
               if ($runway_dir == 1) {
                  if ( $t_dist > 50 ) {
-                        $lat = $lat + rand($point_spn + 0.001);
+                        $lat = $lat + rand($point_spn + 0.0001);
                         $lat = overArealat($lat);
-                        $lng = $lng + rand($point_spn + 0.001);
+                        $lng = $lng + rand($point_spn + 0.0001);
                         $lng = overArealng($lng);
                     } else {
                         $lat = $lat + rand($point_spn);
@@ -1360,9 +1373,9 @@ undef $geo_points_cursole;
                           }}
               if ($runway_dir == 2) {
                  if ( $t_dist > 50 ){
-                        $lat = $lat - rand($point_spn + 0.001);
+                        $lat = $lat - rand($point_spn + 0.0001);
                         $lat = overArealat($lat);
-                        $lng = $lng + rand($point_spn + 0.001);
+                        $lng = $lng + rand($point_spn + 0.0001);
                         $lng = overArealng($lng);
                     } else {
                         $lat = $lat - rand($point_spn);
@@ -1372,9 +1385,9 @@ undef $geo_points_cursole;
                           }}
               if ($runway_dir == 3) {
                  if ( $t_dist > 50 ){
-                        $lat = $lat - rand($point_spn + 0.001);
+                        $lat = $lat - rand($point_spn + 0.0001);
                         $lat = overArealat($lat);
-                        $lng = $lng - rand($point_spn + 0.001);
+                        $lng = $lng - rand($point_spn + 0.0001);
                         $lng = overArealng($lng);
                     } else {
                         $lat = $lat - rand($point_spn);
@@ -1384,9 +1397,9 @@ undef $geo_points_cursole;
                           }}
               if ($runway_dir == 4) {
                  if ( $t_dist > 50 ){
-                        $lat = $lat + rand($point_spn + 0.001);
+                        $lat = $lat + rand($point_spn + 0.0001);
                         $lat = overArealat($lat);
-                        $lng = $lng - rand($point_spn + 0.001);
+                        $lng = $lng - rand($point_spn + 0.0001);
                         $lng = overArealng($lng);
                     } else {
                         $lat = $lat + rand($point_spn);
@@ -1411,8 +1424,8 @@ undef $geo_points_cursole;
                 # 補正
                 d_correction($npcuser_stat,$rundirect,@pointlist);
 
-              # 5m以下に近づくとモードを変更
-              if ($t_dist < 5 ) {
+              # 20m以下に近づくとモードを変更
+              if ($t_dist < 20 ) {
                  $npcuser_stat->{chasecnt} = ++$npcuser_stat->{chasecnt};
                  $npcuser_stat->{status} = "round"; 
                  $target = "";
@@ -1612,27 +1625,27 @@ undef $geo_points_cursole;
               if ( geoarea($lat,$lng) == 1 ) {
 
               if ($runway_dir == 1) {
-                        $lat = $lat + rand($point_spn + 0.002);
+                        $lat = $lat + rand($point_spn + 0.0002);
                         $lat = overArealat($lat);
-                        $lng = $lng + rand($point_spn + 0.002);
+                        $lng = $lng + rand($point_spn + 0.0002);
                         $lng = overArealng($lng);
                           }
               if ($runway_dir == 2) {
-                        $lat = $lat - rand($point_spn + 0.002);
+                        $lat = $lat - rand($point_spn + 0.0002);
                         $lat = overArealat($lat);
-                        $lng = $lng + rand($point_spn + 0.002);
+                        $lng = $lng + rand($point_spn + 0.0002);
                         $lng = overArealng($lng);
                           }
               if ($runway_dir == 3) {
-                        $lat = $lat - rand($point_spn + 0.002);
+                        $lat = $lat - rand($point_spn + 0.0002);
                         $lat = overArealat($lat);
-                        $lng = $lng - rand($point_spn + 0.002);
+                        $lng = $lng - rand($point_spn + 0.0002);
                         $lng = overArealng($lng);
                           }
               if ($runway_dir == 4) {
-                        $lat = $lat + rand($point_spn + 0.002);
+                        $lat = $lat + rand($point_spn + 0.0002);
                         $lat = overArealat($lat);
-                        $lng = $lng - rand($point_spn + 0.002);
+                        $lng = $lng - rand($point_spn + 0.0002);
                         $lng = overArealng($lng);
                           }
 
@@ -1790,27 +1803,27 @@ undef $geo_points_cursole;
 
               # 周回は速度を上乗せ
               if ($runway_dir == 1) {
-                        $lat = $lat + rand($point_spn+0.003);
+                        $lat = $lat + rand($point_spn+0.0003);
                         $lat = overArealat($lat);
-                        $lng = $lng + rand($point_spn+0.003);
+                        $lng = $lng + rand($point_spn+0.0003);
                         $lng = overArealng($lng);
                           }
               if ($runway_dir == 2) {
-                        $lat = $lat - rand($point_spn+0.003);
+                        $lat = $lat - rand($point_spn+0.0003);
                         $lat = overArealat($lat);
-                        $lng = $lng + rand($point_spn+0.003);
+                        $lng = $lng + rand($point_spn+0.0003);
                         $lng = overArealng($lng);
                           }
               if ($runway_dir == 3) {
-                        $lat = $lat - rand($point_spn+0.003);
+                        $lat = $lat - rand($point_spn+0.0003);
                         $lat = overArealat($lat);
-                        $lng = $lng - rand($point_spn+0.003);
+                        $lng = $lng - rand($point_spn+0.0003);
                         $lng = overArealng($lng);
                           }
               if ($runway_dir == 4) {
-                        $lat = $lat + rand($point_spn+0.003);
+                        $lat = $lat + rand($point_spn+0.0003);
                         $lat = overArealat($lat);
-                        $lng = $lng - rand($point_spn+0.003);
+                        $lng = $lng - rand($point_spn+0.0003);
                         $lng = overArealng($lng);
                           }
               } elsif ( geoarea($lat,$lng) == 2 ) {
@@ -2003,6 +2016,7 @@ undef $geo_points_cursole;
                if ( $t_dist < 5 ) {
                    $point_spn = 0.0002;  #元に戻す
                    $npcuser_stat->{point_spn} = 0.0002;
+                   $npcuser_stat->{chasecnt} = ++$npcuser_stat->{chasecnt};   # searchの完了もカウントアップとする
                    $npcuser_stat->{status} = "random";
                    $npcuser_stat->{place}->{name} = "";
                    $npcuser_stat->{place}->{lat} = "";
