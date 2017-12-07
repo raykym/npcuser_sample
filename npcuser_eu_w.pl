@@ -305,7 +305,7 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
                           interval => 10,
                              cb => sub {
                            
-                           $lifecount--;
+                         #  $lifecount--;    # 期間無制限
                            if ( $lifecount == 0 ) {
                              Loging("時間切れで終了...");
                              exit;

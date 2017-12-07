@@ -377,7 +377,7 @@ sub writejson {
                   $npcuser_stat->{icon_url} = iconchg($npcuser_stat->{status});
 
              my $debmsg = to_json($npcuser_stat);
-                 Loging("WRITE MONGODB: $debmsg");
+                 Loging("DEBUG: WRITE MONGODB: $debmsg");
 
                 $timelinecoll->insert_one($npcuser_stat);
 
@@ -402,7 +402,7 @@ sub writechatobj {
                   $chatobj->{hms} = $dt->hms;
                   $chatobj->{ttl} = DateTime->now();
                my $debmsg = to_json($chatobj);
-                  Loging("WRITECHAT: $debmsg");
+                  Loging("DEBUG: WRITECHAT: $debmsg");
                my $chatjson = to_json($chatobj);
                   $redis->publish( $chatname , $chatjson );
                   $walkchatcoll->insert_one($chatobj);              
@@ -904,7 +904,7 @@ undef $targets;
           #     undef $debug;
 
                if ( $#trapevents != -1 ){
-                   Loging("DEBUG: TRAP on Event!!!!!!!");
+                   Loging("TRAP on Event!!!!!!!");
 
                        #Chat表示 トラップ発動時に表示する
                        my $dt = DateTime->now( time_zone => 'Asia/Tokyo');
@@ -1311,7 +1311,7 @@ undef $geo_points_cursole;
                      } 
                
               # ターゲットをロストした場合 random-mode
-              if ( $t_obj->{name} eq "" ) {
+              if ( ! defined $t_obj->{name} ) {
                  $npcuser_stat->{status} = "random"; 
                  $target = ""; 
                  $npcuser_stat->{target} = ""; 
@@ -1566,7 +1566,7 @@ undef $geo_points_cursole;
                      } 
                
               # ターゲットをロストした場合、randomモードへ
-              if (( $t_obj->{name} eq "" )||(! defined $t_obj->{name} )) {
+              if (! defined $t_obj->{name} ) {
                  $npcuser_stat->{status} = "random"; 
                  $target = ""; 
                  $npcuser_stat->{target} = ""; 
@@ -1925,7 +1925,7 @@ undef $geo_points_cursole;
                     weaken($list);
                     my @spointlist = @$list;
                     my $slice = int(rand($#spointlist));
-                    Loging("slice: $slice");
+                    Loging("DEBUG: slice: $slice");
                     my $deb = to_json($spointlist[$slice]);
                     Loging("DEBUG: slice: $deb");
                     undef $deb;
@@ -2083,8 +2083,8 @@ undef $geo_points_cursole;
 #Loging("rundirect check");
 #Dump($rundirect);
 
-        Loging("---------------------LOOP END-----------------------------------");
 
+        Loging("---------------------LOOP END-----------------------------------");
     #   $cv->send;  # never end loop
        });  # AnyEvent CV 
 
