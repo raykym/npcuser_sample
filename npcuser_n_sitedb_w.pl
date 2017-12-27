@@ -11,6 +11,8 @@
 # usage
 # npcuser_n_sitedb.pl [ghostmanid]
 
+my $timelineredis = 0; # 0: mongodb  1: redis
+
 use strict;
 use warnings;
 use utf8;
@@ -363,11 +365,8 @@ sub geoDirect {
 # 送信処理 npcuser_statを時刻チェックして送信する。
 sub writejson {
     my $npcuser_stat = shift;
-                  $timelinecoll->delete_many({"userid" => $npcuser_stat->{userid}}); # mognodb3.2 削除してから
-             #    $timerecord = DateTime->now()->epoch();
-             #    $timerecord = $timerecord * 1000; #ミリ秒に合わせるために
-             #    $npcuser_stat->{time} = $timerecord;
-                 $npcuser_stat->{ttl} = DateTime->now();
+                  $timelinecoll->delete_many({"userid" => $npcuser_stat->{userid}}) if $timelineredis == 0; # mognodb3.2 削除してから
+                  $npcuser_stat->{ttl} = DateTime->now();
 
                   $npcuser_stat->{geometry}->{coordinates} = [ $lng, $lat ];
                   $npcuser_stat->{loc}->{lat} = $lat;
@@ -379,7 +378,14 @@ sub writejson {
              my $debmsg = to_json($npcuser_stat);
                  Loging("DEBUG: WRITE MONGODB: $debmsg");
 
-                $timelinecoll->insert_one($npcuser_stat);
+                 if ( $timelineredis == 0 ) {
+                     $timelinecoll->insert_one($npcuser_stat);
+                 } elsif ( $timelineredis == 1 ) {
+                    my $npcuser_stat_json = to_json($npcuser_stat);
+                    $redis->set("Maker$npcuser_stat->{userid}" => $npcuser_stat_json);
+                    $redis->expire("Maker$npcuser_stat->{userid}" , 32 ); #32秒保持する
+                    undef $npcuser_stat_json;
+                 }
 
                 $timelinelog->insert_one($npcuser_stat);
 
@@ -610,8 +616,16 @@ sub latlng_correction {
                                   # TTLレコードを追加する。
                                   $username = $npcuser_stat->{name}; #Logingで利用されるため、設定だけしておく
                                   $npcuser_stat->{ttl} = DateTime->now();
-                                  $timelinecoll->delete_many({"userid" => $npcuser_stat->{userid}}); # mognodb3.2 削除してから
-                                  $timelinecoll->insert_one($npcuser_stat);
+
+                                  if ( $timelineredis == 0 ) {
+                                      $timelinecoll->delete_many({"userid" => $npcuser_stat->{userid}}); # mognodb3.2 削除してから
+                                      $timelinecoll->insert_one($npcuser_stat);
+                                  } elsif ( $timelineredis == 1) {
+                                      my $npcuser_stat_json = to_json($npcuser_stat);
+                                      $redis->set("Maker$npcuser_stat->{userid}" => $npcuser_stat_json);
+                                      $redis->expire("Maker$npcuser_stat->{userid}" , 32 ); #32秒保持する
+                                      undef $npcuser_stat_json;
+                                  }
                                   $timelinelog->insert_one($npcuser_stat);
                                   undef $dt;
                             } # foreach $npcuser_stat
@@ -740,7 +754,11 @@ undef @makerlist; #makerチェックは１０秒ループで１回なので、�
 
                        # 元々はhitnameをsite1に送るが、db直結になりアカウント情報を持つのでhitnameを利用しない
                                 Loging("$username 祓われた。。。");
-                                $timelinecoll->delete_many({"userid" => "$messobj->{to}"}); # mognodb3.2
+                                if ( $timelineredis == 0 ) {
+                                    $timelinecoll->delete_many({"userid" => "$messobj->{to}"}); # mognodb3.2
+                                } elsif ( $timelineredis == 1 ){
+                                    $redis->del("Maker$messobj->{to}"); 
+                                }
 
                                 # 履歴を読んでカウントアップする
                                 my $memcountobj = $membercount->find_one_and_delete({'userid'=>"$messobj->{execute}"});
@@ -802,7 +820,10 @@ undef $targets;
                              my @list = @$run_gacclist;
                              for (my $i=0; $i <= $#list ; $i++){
                                  if ( $list[$i]->{userid} eq $npcuser_stat->{userid}){
-                                     $timelinecoll->delete_many({"userid" => "$npcuser_stat->{userid}"}); # mognodb3.2
+
+                                     $timelinecoll->delete_many({"userid" => "$npcuser_stat->{userid}"}) if $timelineredis == 0; # mognodb3.2
+                                     $redis->del("Maker$npcuser_stat->{userid}") if $timelineredis == 1;
+
                                      splice(@$run_gacclist,$i,1);
                                  } 
                              } # for
@@ -822,7 +843,10 @@ undef $targets;
                              }
 
            # mongo3.2用 3000m以内のデータを返す
-           my $geo_points_cursole = $timelinecoll->query({ geometry => {
+           @pointlist = ();
+           my $geo_points_cursole;
+           if ( $timelineredis == 0 ){ 
+              $geo_points_cursole = $timelinecoll->query({ geometry => {
                                                            '$nearSphere' => {
                                                            '$geometry' => {
                                                                 type => "point",
@@ -831,6 +855,7 @@ undef $targets;
                                                            '$maxDistance' => 3000
                                      }}});
            @pointlist = $geo_points_cursole->all; # 原則重複無しの想定
+           } # timelineredis == 1の場合はMakerで処理される
 
            #makerをredisから抽出して、距離を算出してリストに加える。
            #  my @makerkeylist = $redis->keys("Maker*");  #以下に置き換え
@@ -882,7 +907,11 @@ undef $targets;
                    } # foreach makerpoint
 
                    # makerとメンバーリストを結合する
-                   push (@pointlist,@makerlist);
+                   if (@pointlist){
+                       push (@pointlist,@makerlist);
+                   } else {
+                       @pointlist = @makerlist;   # timelineredis==1の場合
+                   }
 
             #   my $hash = { 'pointlist' => \@pointlist }; #受信した時と同じ状況
 
@@ -939,7 +968,11 @@ undef $targets;
                    undef $trapmember_cursole;
 
                    # MemberTimeLineからの削除
-                   $timelinecoll->delete_many({"userid" => "$npcuser_stat->{userid}"}); # mognodb3.2
+                   if ( $timelineredis == 0 ){
+                       $timelinecoll->delete_many({"userid" => "$npcuser_stat->{userid}"}); # mognodb3.2
+                   } elsif ( $timelineredis == 1) {
+                       $redis->del("Maker$npcuser_stat->{userid}");
+                   }
 
                    # NPCアカウントの終了処理 
                              my @list = @$run_gacclist;
@@ -984,6 +1017,15 @@ undef $targets;
             $targetlist = $pointlist;
 
           #  undef $hash;
+
+       # timelineredis == 1 の場合、@makerからユニットを除外する
+          if ( $timelineredis == 1 ) {
+              my @tmp_makerlist = @makerlist;
+                 @makerlist = ();
+              foreach my $i (@tmp_makerlist){
+                 push(@makerlist,$i) if ($i->{name} eq 'maker');
+              } # foreach
+          }
 
      # Makerがある場合の処理 targetをmakerに変更してstatをchaseに
        if (@makerlist) {
@@ -1739,7 +1781,7 @@ undef $geo_points_cursole;
                         }
                      } 
               # ターゲットをロストした場合、randomモードへ
-              if ( $t_obj->{name} eq "" ) {
+              if ( ! defined $t_obj->{name} ) {
                  $npcuser_stat->{status} = "random";
                  $target = "";
                  $npcuser_stat->{target} = "";

@@ -1,7 +1,6 @@
 #!/usr/bin/env perl
 
 # user emurate webでの一般ユーザと同じように動くが、トラップは無い
-# 1weekの寿命
 # 3km圏内のユーザ数に応じてghostの出現数を調整
 #
 # npcuser_eu_w.pl [email] [emailpass] {lat} {lng} {mode}
@@ -371,7 +370,17 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
              } 
          }
 
-         my $unitcnt = $#userunit + 1;
+         my $unitcnt;
+
+         if ( $#userunit < 5 ) {
+
+                $unitcnt = 5;
+
+             } elsif ( $#userunit >= 5 ) {
+
+                $unitcnt = 10;
+
+             }
 
          if ( $#gaccunit < $unitcnt ){
              $ua->post("https://westwind.backbone.site/ghostman/gaccput" => form => { c => "1", lat => "$lat", lng => "$lng" });
@@ -699,7 +708,7 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
                      } 
                
               # ターゲットをロストした場合、random-mode
-              if ( $t_obj->{name} eq "" ) {
+              if ( ! defined $t_obj->{name} ) {
                  $npcuser_stat->{status} = "random";
                  $target = "";
                  $npcuser_stat->{target} = "";
@@ -856,7 +865,7 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
                      } 
                
               # ターゲットをロストした場合、random-mode
-              if (( $t_obj->{name} eq "" )||(! defined $t_obj->{name} )) {
+              if (! defined $t_obj->{name} ) {
                  $npcuser_stat->{status} = "random";
                  $target = "";
                  $npcuser_stat->{target} = "";
@@ -991,7 +1000,7 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
                         }
                      } 
               # ターゲットをロストした場合、random-mode
-              if ( $t_obj->{name} eq "" ) {
+              if ( ! defined $t_obj->{name} ) {
                  $npcuser_stat->{status} = "random";
                  $target = "";
                  $npcuser_stat->{target} = "";
