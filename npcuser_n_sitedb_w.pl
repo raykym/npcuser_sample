@@ -13,6 +13,10 @@
 
 my $timelineredis = 0; # 0: mongodb  1: redis
 
+my $mongoserver = "10.140.0.5";
+my $redisserver = "10.140.0.5";
+my $server = "westwind.backbone.site";   # DNS lookup
+
 use strict;
 use warnings;
 use utf8;
@@ -43,15 +47,14 @@ use Sessionid;
 
 $| = 1;
 
-# DB設定
-my $mongoclient = MongoDB->connect('mongodb://westwind:27017');
-#my $mango = Mango->new('mongodb://dbs-1:27017'); 
 
-my $server = "westwind.backbone.site";
+# DB設定
+my $mongoclient = MongoDB->connect("mongodb://$mongoserver:27017");
+#my $mango = Mango->new('mongodb://dbs-1:27017'); 
 
 #一般コマンド用
 my $redis = AnyEvent::Redis->new(
-    host => '10.140.0.6',
+    host => "$redisserver",
     port => 6379,
     encoding => 'utf8',
     on_error => sub { warn @_ },
@@ -60,7 +63,7 @@ my $redis = AnyEvent::Redis->new(
 
 #subscribe用
 my $redisAE = AnyEvent::Redis->new(
-    host => '10.140.0.6',
+    host => "$redisserver",
     port => 6379,
     encoding => 'utf8',
     on_error => sub { warn @_ },

@@ -26,6 +26,8 @@ use Sessionid;
 
 $| = 1;
 
+my $server = "westwind.backbone.site";  # dns lookup
+
 # npcuser用モジュール
 
 if ( $#ARGV < 1 ) {
@@ -56,7 +58,7 @@ sub Loging{
 }
 
 # Login認証
-my $tx = $ua->post('https://westwind.backbone.site/signinact' => form => { email => "$email", password => "$emailpass" });
+my $tx = $ua->post("https://$server/signinact" => form => { email => "$email", password => "$emailpass" });
 
 if (my $res = $tx->success){ say $res->body }
    else {
@@ -68,7 +70,7 @@ if (my $res = $tx->success){ say $res->body }
 my $username = "";
 my $userid = "";
 
-  $tx = $ua->get('https://westwind.backbone.site/walkworld/view');
+  $tx = $ua->get("https://$server/walkworld/view");
 if (my $res = $tx->success){ 
 
     # username useridを取得する
@@ -286,7 +288,7 @@ my $oncerun = "true";
 
    if ($oncerun) {
       # 1回のみ送信  起動時初回の位置情報を送信
-      $ua->websocket('wss://westwind.backbone.site/walkworld' => sub {
+      $ua->websocket("wss://$server/walkworld" => sub {
           my ($ua,$tx) = @_;
               iconchg($npcuser_stat->{status});
               sendjson($tx);
@@ -312,7 +314,7 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
   Loging("life count: $lifecount ");
 
 # websocketでの位置情報送受信
-  $txw = $ua->websocket('wss://westwind.backbone.site/walkworld' =>  sub {
+  $txw = $ua->websocket("wss://$server/walkworld" =>  sub {
 
     my ($ua,$tx) = @_;
 
@@ -383,7 +385,7 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
              }
 
          if ( $#gaccunit < $unitcnt ){
-             $ua->post("https://westwind.backbone.site/ghostman/gaccput" => form => { c => "1", lat => "$lat", lng => "$lng" });
+             $ua->post("https://$server/ghostman/gaccput" => form => { c => "1", lat => "$lat", lng => "$lng" });
              Loging("SET UNIT ADD!!!!"); 
          } 
 
