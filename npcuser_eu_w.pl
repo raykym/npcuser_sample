@@ -1,7 +1,8 @@
 #!/usr/bin/env perl
 
 # user emurate webでの一般ユーザと同じように動くが、トラップは無い
-# 3km圏内のユーザ数に応じてghostの出現数を調整
+# 1km圏内のユーザ数に応じてghostの出現数を調整
+# 同じ条件なので攻撃半径を10mに縮小
 #
 # npcuser_eu_w.pl [email] [emailpass] {lat} {lng} {mode}
 # email passwordは必須
@@ -24,9 +25,33 @@ use AnyEvent;
 use lib '/home/debian/perlwork/mojowork/server/ghostman/lib/Ghostman/Model';
 use Sessionid;
 
+use MongoDB;
+use Encode qw/encode_utf8 decode_utf8/;
+
 $| = 1;
 
 my $server = "westwind.backbone.site";  # dns lookup
+
+my $mongoserver = "10.140.0.8";
+
+my @keyword = ( "コンビニ",
+                "銀行",
+                "役所",
+                "スーパー",
+                "駅",
+                "図書館",
+                "レストラン",
+                "神社",
+                "寺",
+              );
+my $apikey = "AIzaSyC8BavSYT3W-CNuEtMS5414s3zmtpJLPx8";
+my $radi = 3000; #検索レン
+
+
+# DB設定   ロギング用
+my $mongoclient = MongoDB->connect("mongodb://$mongoserver:27017");
+my $wwlogdb = $mongoclient->get_database('WalkWorldLOG');
+my $npcuserlog = $wwlogdb->get_collection('npcuserlog');
 
 # npcuser用モジュール
 
@@ -53,7 +78,17 @@ sub Loging{
     my $logline = shift;
     my $dt = DateTime->now();
 
+       $logline = encode_utf8($logline);
+
     say "$dt | $email : $logline";
+    $logline = decode_utf8($logline);
+    my $dblog = { 'ttl' => $dt, 'logline' => $logline, 'email' => $email };    # ログ切り分け用にemailを設定
+       $npcuserlog->insert_one($dblog);
+
+    undef $logline;
+    undef $dt;
+    undef $dblog;
+
     return;
 }
 
@@ -114,7 +149,7 @@ my $runmode = "random";
         $runmode = $ARGV[4];
        } 
 
-my $lifecount = 60480; #1week /10sec count
+my $lifecount = 3153600; #1year /10sec count
 
 my $icon_url = ""; # 暫定
 my $timerecord;
@@ -139,6 +174,7 @@ my $npcuser_stat = {
           "icon_url" => $icon_url,
           "target" => "",
           "category" => "USER",
+          "place" => { "lat" => "", "lng" => "", "name" => ""},
            };
 
 my $txtmsg = "dumm";
@@ -228,7 +264,7 @@ sub overArealng {
 
 sub spnchange {
        my $t_dist = shift;
-          if ( $t_dist > 50 ) {
+          if ( $t_dist > 30 ) {
                $point_spn = 0.0002;
                Loging("point_spn: $point_spn");
              } else {
@@ -260,6 +296,13 @@ sub sendjson {
                  $timerecord = DateTime->now()->epoch();
                  $timerecord = $timerecord * 1000; #ミリ秒に合わせるために
                  $npcuser_stat->{time} = $timerecord;
+
+              $npcuser_stat->{geometry}->{coordinates}= [ $lng, $lat ];
+              $npcuser_stat->{loc}->{lat} = $lat;
+              $npcuser_stat->{loc}->{lng} = $lng; 
+              $npcuser_stat->{rundirect} = $rundirect;
+              iconchg($npcuser_stat->{status});
+
              my $debmsg = to_json($npcuser_stat);
                  Loging("SENDJSON: $debmsg");
                  $tx->send( { json => $npcuser_stat } );
@@ -277,6 +320,146 @@ sub sendchatobj {
                   Loging("SENDCHATJSON: $debmsg");
                   $tx->send( { json => $chatobj } );
                   return;
+}
+
+sub d_correction {
+    # rundirectへの補正を検討する   d_correction($npcuser_stat,$rundirect,@pointlist); で利用する
+    # 共通変数$lat $lngへ直接補正を行う
+    my ( $npcuser_stat, $rundirect, @pointlist ) = @_;
+
+    Loging("DEBUG: d_correction: in: $rundirect");
+
+    # 空なら0を返す
+    if (! @pointlist){
+        Loging("DEBUG: d_correction: out: $rundirect");
+        return;
+    }
+
+    my @userslist;
+
+    #自分を除外
+    for my $i (@pointlist){
+        if ( $i->{userid} eq $npcuser_stat->{userid}){
+           next;
+           }
+        push(@userslist,$i);
+    }
+
+    # UNITが居ない場合
+    if (! @userslist){
+       Loging("DEBUG: d_correction: out: $rundirect");
+       return;
+    }
+
+    # 追跡ターゲットが設定されていた場合,ターゲットは回避対象から外す
+    if ( $npcuser_stat->{target} ){
+        for (my $i=0; $i <= $#userslist; $i++){
+            if ( $pointlist[$i]->{userid} eq $npcuser_stat->{target} ){
+                 Loging("DROP userslist: $userslist[$i]->{name} ");
+                 splice(@userslist,$i,1);
+                 last;
+            }
+        } # for
+    } # if
+
+   my @usersdirect;
+
+   # 距離と方角を計算する 距離が50m以下のみを抽出
+   for my $i (@userslist){
+
+              #直径をかけてメートルになおす lat lngの位置に注意
+              my @s_p = NESW($lng, $lat);
+              my @t_p = NESW($i->{loc}->{lng}, $i->{loc}->{lat});
+              my $t_dist = great_circle_distance(@s_p,@t_p,6378140);
+              my $t_direct = geoDirect($lat, $lng, $i->{loc}->{lat}, $i->{loc}->{lng});
+
+              my $dist_direct = { "dist" => $t_dist, "direct" => $t_direct };
+              push(@usersdirect,$dist_direct) if ($t_dist < 50);
+   }
+
+   # 50m以内に居ない
+   if (! @usersdirect) {
+       Loging("DEBUG: d_correction: out: $rundirect");
+       return;
+   }
+
+   for my $i (@usersdirect){
+
+       my $cul_direct = $rundirect - $i->{direct};
+
+       if ( ($cul_direct > 45 ) || ($cul_direct < -45)){
+          # 進行方向左右45度以外(補正範囲外）
+          Loging("DEBUG: d_correction: out: $rundirect");
+          return;
+       }
+
+       if (( $cul_direct < 45 ) && ( $cul_direct > 0)) {
+          # 補正左に45度
+          $rundirect = $rundirect - 45;
+          if ($rundirect < 0 ) {
+             $rundirect = 360 + $rundirect;
+          }
+          Loging("DEBUG: d_correction: out: $rundirect");
+
+          # lat lngへの補正
+          latlng_correction($rundirect);
+          return;
+       }
+       if (( $cul_direct > -45 ) && ( $cul_direct < 0 )) {
+          # 補正右に45度
+          $rundirect = $rundirect + 45;
+          if ($rundirect > 360){
+             $rundirect = 360 - $rundirect;
+          }
+          Loging("DEBUG: d_correction: out: $rundirect");
+
+          # lat lngへの補正
+          latlng_correction($rundirect);
+          return;
+       }
+   } # for
+   Loging("DEBUG: d_correction: out: $rundirect");
+   return;  # 念のため
+} # d_crrection
+
+sub latlng_correction {
+    # d_correction用に補正したrundirectからlat or lngのどちらに補正するか判定する
+    # 45度単位で分割して補正する
+    my $rundirect = shift;
+
+    if ( geoarea($lat,$lng) == 1 ){
+        # 東経北緯
+        if (( $rundirect > 315 )||( $rundirect < 45 )){
+             # 北方向へ補正
+             $lat = $lat + 0.0001;
+             $lat = overArealat($lat);
+             Loging("DEBUG: lat+ correction");
+           } elsif (($rundirect > 45 ) || ( $rundirect < 135)){
+             # 東方向へ補正
+             $lng = $lng + 0.0001;
+             $lng = overArealng($lng);
+             Loging("DEBUG: lng+ correction");
+           } elsif (( $rundirect > 135 ) || ( $rundirect < 225 )){
+             # 南方向へ補正
+             $lat = $lat - 0.0001;
+             $lat = overArealat($lat);
+             Loging("DEBUG: lat- correction");
+           } elsif (( $rundirect > 225 ) || ( $rundirect < 315 )) {
+             # 西方向へ補正
+             $lng = $lng - 0.0001;
+             $lng = overArealng($lng);
+             Loging("DEBUG: lng- correction");
+           }
+       } elsif ( geoarea($lat,$lng) == 2) {
+       # 西経北緯
+
+       } elsif ( geoarea($lat,$lng) == 3) {
+       # 東経南緯
+
+       } elsif ( geoarea($lat,$lng) == 4) {
+       # 西経南緯
+
+       }
 }
 
 sub NESW { deg2rad($_[0]), deg2rad(90 - $_[1]) }
@@ -301,17 +484,18 @@ my $oncerun = "true";
 my $txw;
 
 #ループ処理 
-my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう。
+my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう。 途中で終了出来ない問題が起きた
  my $t = AnyEvent->timer( after => 10,
                           interval => 10,
                              cb => sub {
                            
-                         #  $lifecount--;    # 期間無制限
+                           $lifecount--;  
                            if ( $lifecount == 0 ) {
                              Loging("時間切れで終了...");
                              exit;
                              }
   Loging("life count: $lifecount ");
+
 
 # websocketでの位置情報送受信
   $txw = $ua->websocket("wss://$server/walkworld" =>  sub {
@@ -374,15 +558,23 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
 
          my $unitcnt;
 
-         if ( $#userunit < 5 ) {
-
-                $unitcnt = 5;
-
-             } elsif ( $#userunit >= 5 ) {
-
-                $unitcnt = 10;
-
-             }
+   #      if ( $#userunit < 1 ) {    # 2体までは
+   #             $unitcnt = 5;
+   #          } elsif ( $#userunit >= 2 ) {
+   #             $unitcnt = 10;
+   #          }
+         # user数に対応して段階的にunit数を増やす
+         if ( $#userunit < 1 ) {
+             $unitcnt = 5;
+         } elsif ( $#userunit == 2 ) {
+             $unitcnt = 6;
+         } elsif ( $#userunit == 3 ) {
+             $unitcnt = 7;
+         } elsif ( $#userunit == 4 ) {
+             $unitcnt = 8;
+         } elsif ( $#userunit >= 5 ) {
+             $unitcnt = 10;
+         }
 
          if ( $#gaccunit < $unitcnt ){
              $ua->post("https://$server/ghostman/gaccput" => form => { c => "1", lat => "$lat", lng => "$lng" });
@@ -449,6 +641,46 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
        Loging("WebSocket closed with status $code. $username");
     #   exit;
     });
+
+
+          # eu用　共通撃墜処理5m以内のunitをお祓いする  chase以外でも:5m以内なら攻撃する追加設定
+          my @eutargets;
+          for my $i (@$targets){
+                 # makerを除外
+                 if ( $i->{name} eq "maker"){
+                     next;
+                 } 
+                # category USERは除外済想定
+              my @s_p = NESW($lng, $lat);
+              my @t_p = NESW($i->{loc}->{lng}, $i->{loc}->{lat});
+              my $t_dist = great_circle_distance(@s_p,@t_p,6378140);
+
+              if ($t_dist > 5 ){
+              # 5m以上は除外
+                  next;
+              }
+
+              push(@eutargets,$i);
+
+              undef @s_p;
+              undef @t_p;
+              undef $t_dist;
+          }
+
+          if (@eutargets){
+              for my $i (@eutargets){
+                  my $hit_param = { to => $i->{userid}, execute => $userid, execemail => $email };
+                  my $debug = to_json($hit_param);
+                  Loging("DEBUG: hit_param: $i->{name} 攻撃した $debug");
+                  $tx->send( { json => $hit_param } );
+              }
+          } # if
+
+# 6時間に１回　search:モードに変更する
+   if ( $lifecount % 2160 == 0 ) {
+        Loging("Change mode search.... for 6hours : $lifecount");
+        $npcuser_stat->{status} = "search";
+   }
 
              # テスト用　位置保持
              if ( $npcuser_stat->{status} eq "STAY") {
@@ -549,7 +781,7 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
 
 
                 # モード変更チェック 
-                   if (int(rand(10)) > 5) {
+                   if (int(rand(100)) > 90) {
 
                         if ($#chk_targets == -1) { return; }
 
@@ -560,35 +792,44 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
                         my $txtmsg  = "追跡モードになったよ！";
                         $chatobj->{chat} = $txtmsg;
                      #   sendchatobj($tx);
-                        return;
+                     #   return;
+
+                   }  elsif (int(rand(1000)) > 999) {
+                        $npcuser_stat->{status} = "search";
+                        Loging("Mode change Search!");
+                        sendjson($tx);
+
+                        $txtmsg = "Searchモードに変わったよ！";
+                        $chatobj->{chat} = $txtmsg;
+                     #   sendchatobj($tx);
+
+                     #   return;
+
+                   } elsif (int(rand(1000)) > 999 ) {
+
+                        if ($#chk_targets == -1) { return; }
+
+                        $npcuser_stat->{status} = "round";
+                        Loging("Mode change Round!");
+                        sendjson($tx);
+
+                        my $txtmsg  = "周回モードになったよ！";
+                        $chatobj->{chat} = $txtmsg;
+                     #   sendchatobj($tx);
+                    #    return;
+                   } elsif (int(rand(1000)) > 999 ) {
+
+                        if ($#chk_targets == -1) { return; }
+
+                        $npcuser_stat->{status} = "runaway";
+                        Loging("Mode change Runaway!");
+                        sendjson($tx);
+
+                        my $txtmsg  = "逃走モードになったよ！";
+                        $chatobj->{chat} = $txtmsg;
+                     #   sendchatobj($tx);
+                     #   return;
                    }
-
-       # euではrandomとchaseのみ
-                #   } elsif (int(rand(10)) > 6 ) {
-
-                #        if ($#chk_targets == -1) { return; }
-
-                #        $npcuser_stat->{status} = "round";
-                #        Loging("Mode change Round!");
-                #        sendjson($tx);
-
-                #        my $txtmsg  = "周回モードになったよ！";
-                #        $chatobj->{chat} = $txtmsg;
-                #        sendchatobj($tx);
-                     #   return;
-                #   } elsif (int(rand(10)) > 8 ) {
-
-                #        if ($#chk_targets == -1) { return; }
-
-                #        $npcuser_stat->{status} = "runaway";
-                #        Loging("Mode change Runaway!");
-                #        sendjson($tx);
-
-                #        my $txtmsg  = "逃走モードになったよ！";
-                #        $chatobj->{chat} = $txtmsg;
-                #        sendchatobj($tx);
-                     #   return;
-                #   }
 
                 #スタート地点からの距離判定
                 # radianに変換
@@ -633,7 +874,9 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
             #      }
 
              #    undef @chk_targets; # clear 
-
+            
+                 sendjson($tx);
+                 return;
              } # if stat random
 
     # 追跡モード
@@ -667,7 +910,7 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
                      Loging("target: $target : $lc : $tnum : $t_list[$tnum]->{name}"); 
                 }
 
-          # eu用　20m以内のunitをお祓いする
+          # eu用　10m以内のunitをお祓いする
           my @eutargets;
           for my $i (@$targets){
                  # makerを除外
@@ -679,8 +922,8 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
               my @t_p = NESW($i->{loc}->{lng}, $i->{loc}->{lat});
               my $t_dist = great_circle_distance(@s_p,@t_p,6378140);
 
-              if ($t_dist > 20 ){
-              # 20m以上は除外
+              if ($t_dist > 10 ){
+              # 10m以上は除外
                   next;
               }
 
@@ -752,12 +995,12 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
 
               if ( geoarea($lat,$lng) == 1 ) {
 
-              # 追跡は速度を多めに設定 50m以上離れている場合は高速モード
+              # 追跡は速度を多めに設定 20m以上離れている場合は高速モード
               if ($runway_dir == 1) {
-                 if ( $t_dist > 50 ) {
-                        $lat = $lat + rand($point_spn + 0.0001);
+                 if ( $t_dist > 20 ) {
+                        $lat = $lat + ( rand($point_spn) + 0.0001);
                         $lat = overArealat($lat);
-                        $lng = $lng + rand($point_spn + 0.0001);
+                        $lng = $lng + ( rand($point_spn) + 0.0001);
                         $lng = overArealng($lng);
                     } else {
                         $lat = $lat + rand($point_spn);
@@ -766,10 +1009,10 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
                         $lng = overArealng($lng);
                           }}
               if ($runway_dir == 2) {
-                 if ( $t_dist > 50 ){
-                        $lat = $lat - rand($point_spn + 0.0001);
+                 if ( $t_dist > 20 ){
+                        $lat = $lat - ( rand($point_spn) + 0.0001);
                         $lat = overArealat($lat);
-                        $lng = $lng + rand($point_spn + 0.0001);
+                        $lng = $lng + ( rand($point_spn) + 0.0001);
                         $lng = overArealng($lng);
                     } else {
                         $lat = $lat - rand($point_spn);
@@ -778,10 +1021,10 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
                         $lng = overArealng($lng);
                           }}
               if ($runway_dir == 3) {
-                 if ( $t_dist > 50 ){
-                        $lat = $lat - rand($point_spn + 0.0001);
+                 if ( $t_dist > 20 ){
+                        $lat = $lat - ( rand($point_spn) + 0.0001);
                         $lat = overArealat($lat);
-                        $lng = $lng - rand($point_spn + 0.0001);
+                        $lng = $lng - ( rand($point_spn) + 0.0001);
                         $lng = overArealng($lng);
                     } else {
                         $lat = $lat - rand($point_spn);
@@ -790,10 +1033,10 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
                         $lng = overArealng($lng);
                           }}
               if ($runway_dir == 4) {
-                 if ( $t_dist > 50 ){
-                        $lat = $lat + rand($point_spn + 0.0001);
+                 if ( $t_dist > 20 ){
+                        $lat = $lat + ( rand($point_spn) + 0.0001);
                         $lat = overArealat($lat);
-                        $lng = $lng - rand($point_spn + 0.0001);
+                        $lng = $lng - ( rand($point_spn) + 0.0001);
                         $lng = overArealng($lng);
                     } else {
                         $lat = $lat + rand($point_spn);
@@ -815,6 +1058,8 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
 
               } # geoarea if
 
+              # 補正
+              d_correction($npcuser_stat,$rundirect,@$targets);
 
               # 5m以下に近づくとモードを変更   その前にターゲットを攻撃してターゲットをロストする想定
               if ($t_dist < 5 ) {
@@ -825,6 +1070,7 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
                  my $txtmsg  = "Randomモードになったよ！";
                  $chatobj->{chat} = $txtmsg;
               #   sendchatobj($tx);
+                 return;
                  }
 
 
@@ -841,6 +1087,8 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
 
          #    undef @chk_targets; # clear
 
+                sendjson($tx);
+                return;
              } # if chase
 
        # 逃走モード
@@ -965,19 +1213,25 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
                     my $txtmsg  = "周回モードになったよ！";
                     $chatobj->{chat} = $txtmsg;
                     sendchatobj($tx);
+                    return;
 
               # 1500m以上に離れるとモードを変更
               } elsif (($t_dist > 1500 ) || ($#chk_targets > 20)) {
                  $npcuser_stat->{status} = "random"; 
                  $target = "";
                  $npcuser_stat->{target} = "";
+                 sendjson($tx);
+
                  Loging("Mode Change........radom.");
                  my $txtmsg  = "Randomモードになったよ！";
                  $chatobj->{chat} = $txtmsg;
                  sendchatobj($tx);
+                 return;
                  }
 
           #   undef @chk_targets; # clear
+              sendjson($tx);
+              return;
           } # runaway
 
        # 周回動作
@@ -1010,6 +1264,7 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
                  my $txtmsg  = "Randomモードになったよ！";
                  $chatobj->{chat} = $txtmsg;
                  sendchatobj($tx);
+                 return;
                  }
 
               my $deb_obj = to_json($t_obj); 
@@ -1041,13 +1296,13 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
 
               # 右回りプラス方向
               if ( $round_dire == 1 ) {
-                  $t_direct = $t_direct + 90;
+                  $t_direct = $t_direct + 45;
                   if ( $t_direct > 360 ) { $t_direct = $t_direct - 360; }
               } else {
                   # 左回りマイナス方向
-                  $t_direct = $t_direct - 90;
+                  $t_direct = $t_direct - 45;
                   if ( $t_direct < 0 ) { $t_direct = $t_direct + 360 ;}
-                }
+              }
                 $rundirect = $t_direct;
 
               my $runway_dir = 1;
@@ -1059,29 +1314,34 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
 
               if ( geoarea($lat,$lng) == 1 ) {
 
+              my $addpoint = $t_dist / 100000 if ( defined $t_dist );   # 距離(m)を割る
+                 if ( ! defined $addpoint ) {
+                     $addpoint = 0.005;
+                 }
+
               # 周回は速度を上乗せ
               if ($runway_dir == 1) {
-                        $lat = $lat + rand($point_spn+0.0003);
+                        $lat = $lat + rand($point_spn + $addpoint);
                         $lat = overArealat($lat);
-                        $lng = $lng + rand($point_spn+0.0003);
+                        $lng = $lng + rand($point_spn + $addpoint);
                         $lng = overArealng($lng);
                           }
               if ($runway_dir == 2) {
-                        $lat = $lat - rand($point_spn+0.0003);
+                        $lat = $lat - rand($point_spn + $addpoint);
                         $lat = overArealat($lat);
-                        $lng = $lng + rand($point_spn+0.0003);
+                        $lng = $lng + rand($point_spn + $addpoint);
                         $lng = overArealng($lng);
                           }
               if ($runway_dir == 3) {
-                        $lat = $lat - rand($point_spn+0.0003);
+                        $lat = $lat - rand($point_spn + $addpoint);
                         $lat = overArealat($lat);
-                        $lng = $lng - rand($point_spn+0.0003);
+                        $lng = $lng - rand($point_spn + $addpoint);
                         $lng = overArealng($lng);
                           }
               if ($runway_dir == 4) {
-                        $lat = $lat + rand($point_spn+0.0003);
+                        $lat = $lat + rand($point_spn + $addpoint);
                         $lat = overArealat($lat);
-                        $lng = $lng - rand($point_spn+0.0003);
+                        $lng = $lng - rand($point_spn + $addpoint);
                         $lng = overArealng($lng);
                           }
               } elsif ( geoarea($lat,$lng) == 2 ) {
@@ -1098,14 +1358,21 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
 
               } # geoarea if
 
+
+              # 補正
+              d_correction($npcuser_stat,$rundirect,@$targets);
+
               if ( int(rand(100)) > 90 ) {
                  $npcuser_stat->{status} = "random"; 
                  $target = "";
                  $npcuser_stat->{target} = "";
+                 sendjson($tx);
+
                  Loging("Mode Change........radom.");
                  my $txtmsg  = "Randomモードになったよ！";
                  $chatobj->{chat} = $txtmsg;
                  sendchatobj($tx);
+                 return;
                  } 
 
            if (($npcuser_stat->{status} eq "round") && ( $#chk_targets > 20 )) {
@@ -1121,7 +1388,140 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
 
           #   undef @chk_targets; # clear
 
+             sendjson($tx);
+             return;
           } # round
+
+             # 検索モード
+             if ( $npcuser_stat->{status} eq "search" ){
+
+               if ($npcuser_stat->{place}->{name} eq "") {
+
+                   my $selnum = int(rand($#keyword));
+                   my $keywd = $keyword[$selnum];
+                   Loging("DEBUG: $selnum : $keywd");
+
+                  # target select
+                   my $resjson = $ua->get("https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=$lat,$lng&radius=$radi&key=$apikey&keyword=$keywd")->res->json;
+
+                    undef $selnum;
+                    undef $keywd;
+
+                    if ( $resjson->{status} eq "ZERO_RESULTS" ) {
+                               Loging("Null responce!");
+
+                               $npcuser_stat->{status} = "random";
+                               $npcuser_stat->{place}->{name} = "";
+                               $npcuser_stat->{place}->{lat} = "";
+                               $npcuser_stat->{place}->{lng} = "";
+                               Loging("Mode change random!");
+                               sendjson($tx);
+                               return;
+                       }
+
+                    my $list = $resjson->{results};
+                    my @pointlist = @$list;
+                    my $slice = int(rand($#pointlist));
+                    Loging("slice: $slice");
+                    my $deb = to_json($pointlist[$slice]);
+                    Loging("DEBUG: slice: $deb");
+
+                    $npcuser_stat->{place}->{lat} = $pointlist[$slice]->{geometry}->{location}->{lat} + 0;
+                    $npcuser_stat->{place}->{lng} = $pointlist[$slice]->{geometry}->{location}->{lng} + 0;
+                    $npcuser_stat->{place}->{name} = $pointlist[$slice]->{name};
+
+
+                    my $txtmsg = "今から$npcuser_stat->{place}->{name}へ行くよ！";
+                    $chatobj->{chat} = $txtmsg;
+                    sendchatobj($tx);
+
+                    Loging("DEBUG: Place: $npcuser_stat->{place}->{name} $npcuser_stat->{place}->{lat} $npcuser_stat->{place}->{lng}");
+
+                } # if nameが空ならば
+
+                # move
+                my $runway_dir = 1;
+
+                   $rundirect = geoDirect($npcuser_stat->{loc}->{lat}, $npcuser_stat->{loc}->{lng}, $npcuser_stat->{place}->{lat}, $npcuser_stat->{place}->{lng});
+                Loging("DEBUG: rundirect: $rundirect ");
+
+                if ($rundirect < 90) { $runway_dir = 1; }
+                if (( 90 < $rundirect)&&( $rundirect < 180)) { $runway_dir = 2; }
+                if (( 180 < $rundirect)&&( $rundirect < 270 )) { $runway_dir = 3; }
+                if (( 270 < $rundirect)&&( $rundirect < 360 )) { $runway_dir = 4; }
+
+                Loging("DEBUG: runway_dir: $runway_dir ");
+
+                if ( geoarea($lat,$lng) == 1 ) {
+
+                if ($runway_dir == 1) {
+                          $lat = $lat + rand($point_spn);
+                          $lat = overArealat($lat);
+                          $lng = $lng + rand($point_spn);
+                          $lng = overArealng($lng);
+                          }
+                if ($runway_dir == 2) {
+                          $lat = $lat - rand($point_spn);
+                          $lat = overArealat($lat);
+                          $lng = $lng + rand($point_spn);
+                          $lng = overArealng($lng);
+                          }
+                if ($runway_dir == 3) {
+                          $lat = $lat - rand($point_spn);
+                          $lat = overArealat($lat);
+                          $lng = $lng - rand($point_spn);
+                          $lng = overArealng($lng);
+                          }
+                if ($runway_dir == 4) {
+                          $lat = $lat + rand($point_spn);
+                          $lat = overArealat($lat);
+                          $lng = $lng - rand($point_spn);
+                          $lng = overArealng($lng);
+                          }
+                } elsif ( geoarea($lat,$lng) == 2 ) {
+
+                  # 保留
+
+                } elsif ( geoarea($lat,$lng) == 3 ) {
+
+                  # 保留
+
+                } elsif ( geoarea($lat,$lng) == 4 ) {
+
+                  # 保留
+
+                } # geoarea if
+ 
+                # 補正
+                d_correction($npcuser_stat,$rundirect,@$targets);
+
+                # radianに変換
+                my @s_p = NESW($lng, $lat);
+                my @t_p = NESW($npcuser_stat->{place}->{lng}, $npcuser_stat->{place}->{lat});
+                my $t_dist = great_circle_distance(@s_p,@t_p,6378140);
+                Loging("DEBUG: dist: $t_dist");
+
+                spnchange($t_dist);
+
+               if ( $t_dist < 5 ) {
+                   $point_spn = 0.0002;  #元に戻す
+                   $npcuser_stat->{status} = "random";
+                   $npcuser_stat->{place}->{name} = "";
+                   $npcuser_stat->{place}->{lat} = "";
+                   $npcuser_stat->{place}->{lng} = "";
+                   Loging("Mode change random!");
+                   sendjson($tx);
+
+                   $txtmsg = "Randomモードに変わったよ！";
+                   $chatobj->{chat} = $txtmsg;
+                   sendchatobj($tx);
+
+                   return;
+               }
+
+                 sendjson($tx);
+                 return;
+             } # search
 
               # 送信処理 random chase runaway round共通
           #時刻はsendjsonブロックで追加しているのコメントアウト
@@ -1129,15 +1529,15 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
           #    $timerecord = $timerecord * 1000; #ミリ秒に合わせるために
           #    $npcuser_stat->{time} = $timerecord;
 
-              $npcuser_stat->{geometry}->{coordinates}= [ $lng, $lat ];
-              $npcuser_stat->{loc}->{lat} = $lat;
-              $npcuser_stat->{loc}->{lng} = $lng; 
-              $npcuser_stat->{rundirect} = $rundirect;
+          #    $npcuser_stat->{geometry}->{coordinates}= [ $lng, $lat ];
+          #    $npcuser_stat->{loc}->{lat} = $lat;
+          #    $npcuser_stat->{loc}->{lng} = $lng; 
+          #    $npcuser_stat->{rundirect} = $rundirect;
 
-              iconchg($npcuser_stat->{status});
+          #    iconchg($npcuser_stat->{status});
 
           #    $tx->send( { json => $npcuser_stat } );
-              sendjson($tx);
+          #    sendjson($tx);
           #    return;
           }); #  ua
 

@@ -13,9 +13,9 @@
 
 my $timelineredis = 0; # 0: mongodb  1: redis
 
-my $mongoserver = "10.140.0.5";
-my $redisserver = "10.140.0.5";
-my $server = "westwind.backbone.site";   # DNS lookup
+my $mongoserver = "10.140.0.8";
+my $redisserver = "10.140.0.8";
+my $server = "westwind.backbone.site";   # DNS lookup ghostman access
 
 use strict;
 use warnings;
@@ -66,8 +66,10 @@ my $redisAE = AnyEvent::Redis->new(
     host => "$redisserver",
     port => 6379,
     encoding => 'utf8',
-    on_error => sub { warn @_ },
-    on_cleanup => sub { warn "Connection closed: @_" },
+  #  on_error => sub { warn @_ },
+    on_error => sub { die "error on redis"; },
+  #  on_cleanup => sub { warn "Connection closed: @_" },
+    on_cleanup => sub { die "error redis cleanup"; },
 );
 
 my $wwdb = $mongoclient->get_database('WalkWorld');
@@ -77,6 +79,7 @@ my $trapmemberlist = $wwdb->get_collection('trapmemberlist');
 my $wwlogdb = $mongoclient->get_database('WalkWorldLOG');
 my $timelinelog = $wwlogdb->get_collection('MemberTimeLinelog');
 my $membercount = $wwlogdb->get_collection('MemberCount');
+my $npcuserlog = $wwlogdb->get_collection('npcuserlog');
 
 # WalkChat用
 my $holldb = $mongoclient->get_database('holl_tl');
@@ -89,7 +92,6 @@ my @chatArray = ( $attackCH ); # chatは受信させない
 my @keyword = ( "コンビニ",
                 "銀行",
                 "役所",
-                "スーパー",
                 "駅",
                 "図書館",
                 "レストラン",
@@ -97,19 +99,13 @@ my @keyword = ( "コンビニ",
                 "寺",
                 "病院",
                 "郵便局",
-                "商店",
                 "公園",
-                "学校",
                 "ファーストフード",
                 "菓子", 
-                "工場",
-                "酒造",
                 "道の駅",
                 "遊園地",
-                "花屋",
                 "牧場",
                 "ゴルフ",
-                "野球",
                 "消防署",
                 "警察署",
               );
@@ -142,7 +138,7 @@ my $s_lat = $lat;
 my $s_lng = $lng;
 my $runmode = "random";
 
-my $lifecount = 60480; #1week /10sec count 初期設定で利用、その後gacclistで置き換えられる
+my $lifecount = 17280; # 2days    # npcinitで設定されている　　　60480; #1week /10sec count 初期設定で利用、その後gacclistで置き換えられる
 
 my $icon_url = ""; # 暫定
 my $timerecord;
@@ -183,11 +179,14 @@ sub Loging{
     my $logline = shift;
        $logline = encode_utf8($logline);
     my $dt = DateTime->now();
-   #    $logline = decode_utf8($logline);
     say "$dt | $username: $logline";
+    $logline = decode_utf8($logline);
+    my $dblog = { 'ttl' => $dt, 'logline' => $logline, 'ghostmanid' => $ghostmanid };
+       $npcuserlog->insert_one($dblog);
     
     undef $logline;
     undef $dt;
+    undef $dblog;
 
     return;
 }
@@ -216,7 +215,8 @@ sub npcinit {
         $acc->{loc}->{lng} = $lng if ( $acc->{loc}->{lng} == 0);
         $acc->{rundirect} = int(rand(360)) if ( $acc->{rundirect} eq "");
         $acc->{point_spn} = 0.0002 if ( $acc->{point_spn} eq "");
-        $acc->{lifecount} = 60480 if ( $acc->{lifecount} eq "");
+      #  $acc->{lifecount} = 60480 if ( $acc->{lifecount} eq "");
+        $acc->{lifecount} = 17280 if ( $acc->{lifecount} eq "");
         $acc->{icon_url} = iconchg($acc->{status}) if ($acc->{icon_url} eq "");
         $acc->{chasecnt} = 0 if ( ! defined $acc->{chasecnt} );
 
@@ -328,7 +328,7 @@ sub overArealng {
 
 sub spnchange {
        my $t_dist = shift;
-          if ( $t_dist > 50 ) {
+          if ( $t_dist > 30 ) {
                $point_spn = 0.0002;
            #    Loging("point_spn: $point_spn");
              } else {
@@ -694,8 +694,6 @@ sub latlng_correction {
      #   nullcheckgacc();  # redis subの外へ
         npcinit();
 
-undef @makerlist; #makerチェックは１０秒ループで１回なので、アカウントループの外で初期化
-
      #redisで攻撃判定の受信
      # 以下redisイベント受信時の処理
      #redis receve subscribe
@@ -845,7 +843,7 @@ undef $targets;
                              next; # foreach $npcuser_stat
                              }
 
-           # mongo3.2用 3000m以内のデータを返す
+           # mongo3.2用 1000m以内のデータを返す
            @pointlist = ();
            my $geo_points_cursole;
            if ( $timelineredis == 0 ){ 
@@ -855,7 +853,7 @@ undef $targets;
                                                                 type => "point",
                                                                 "coordinates" => [ $npcuser_stat->{loc}->{lng} , $npcuser_stat->{loc}->{lat} ]},
                                                            '$minDistance' => 0,
-                                                           '$maxDistance' => 3000
+                                                           '$maxDistance' => 1000
                                      }}});
            @pointlist = $geo_points_cursole->all; # 原則重複無しの想定
            } # timelineredis == 1の場合はMakerで処理される
@@ -899,7 +897,11 @@ undef $targets;
                       my @t_p = NESW($makerpoint->{loc}->{lng}, $makerpoint->{loc}->{lat});
                       my $t_dist = great_circle_distance(@s_p,@t_p,6378140);
 
-                      if ( $t_dist < 3000) {
+
+                      if ( $t_dist < 1000) {
+
+                      Loging("DEBUG: t_dist: $t_dist $npcuser_stat->{name} makerlist IN !!");
+
                        push (@makerlist, $makerpoint );
                        }
                    #   undef $makerpoint;
@@ -915,6 +917,8 @@ undef $targets;
                    } else {
                        @pointlist = @makerlist;   # timelineredis==1の場合
                    }
+
+                undef @makerlist; # 毎回クリアされる
 
             #   my $hash = { 'pointlist' => \@pointlist }; #受信した時と同じ状況
 
@@ -1095,6 +1099,73 @@ undef $geo_points_cursole;
               writechatobj($npcuser_stat);
               undef $txtmsg;
            } # if
+
+
+
+    # モード別の処理の前にユーザーを判別して追跡か逃走か判別する処理を加える
+    # 追跡か逃走かの判別をどこで行うか検討が必要
+    # ユーザーを追跡するのか、自発行動を続けるのか判定が必要
+    # randomモードでなくても、確率でユーザー追跡にモード変更する
+
+    my $skipflg = 0;   # targetがmakerの場合を判定する
+    if ( $npcuser_stat->{status} eq 'chase' ) {
+         for my $i ( @makerlist ) {
+             if ( $npcuser_stat->{target} eq $i->{userid} ){
+                 $skipflg = 1;   # makerを追っている
+                 last;
+             }
+         }
+    }  # if chase     
+
+    if ( $skipflg == 0 ) {   # makerをtargetしている場合はパスする
+    if ( $npcuser_stat->{status} ne "search" ) {    # searchはパスする
+    if ( $npcuser_stat->{status} ne "round" ) {    # roundはパスする
+    if ( $npcuser_stat->{status} ne "chase" ) {    # chaseはパスする
+
+        for my $i (@$targetlist){
+            if (($i->{category} eq "USER" ) && ( int(rand(100)) > 50 )) {
+
+              my @s_p = NESW($lng, $lat);
+              my @t_p = NESW($i->{loc}->{lng}, $i->{loc}->{lat});
+              my $t_dist = great_circle_distance(@s_p,@t_p,6378140);
+               
+                if ( $t_dist > (100 + int(rand(100))) ) {  # 100m + 100までのrand
+                     if ( int(rand(100)) < 95 ) {
+                         $npcuser_stat->{status} = "chase"; 
+                         last;
+                     } elsif ( int(rand(100)) < 95) {
+                         $npcuser_stat->{status} = "round"; 
+                         last;
+                     }
+                }  
+
+                if ( $t_dist < (100 + int(rand(100))) ) {
+                     if ( int(rand(100)) < 95 ) {
+                         $npcuser_stat->{status} = "runaway";
+                         last;
+                     } elsif ( int(rand(100)) < 95) {
+                         $npcuser_stat->{status} = "round";
+                         last;
+                     } elsif ( int(rand(100)) < 99) {
+                         $npcuser_stat->{status} = "search";
+                         last;
+                     }
+                }
+            } # if 
+        } # for
+
+    } # if not chase
+    } # if not round
+    } # if not search
+    } # if skipflg
+
+# 6時間に１回　search:モードに変更する
+    if ( $npcuser_stat->{lifecount} % 2160 == 0 ) {
+         Loging("Change mode search.... for 6hours");
+         $npcuser_stat->{status} = "search";
+    }
+
+# ここから下はnpcuser_stat->{status}で処理が分かれる
 
              # テスト用　位置保持
              if ( $npcuser_stat->{status} eq "STAY") {
@@ -1394,7 +1465,20 @@ undef $geo_points_cursole;
 
               spnchange($t_dist);
 
-              my $runway_dir = 1;
+              my $addpoint = 0;
+
+              my $directchk;
+
+                  $directchk = abs ( $t_direct - $t_obj->{rundirect}) ;
+              #進行方向が同じ場合には、 追い越す:
+              if (( $directchk < 20 ) && ($t_dist < 400 )){
+                 $addpoint = (2 * ( $t_dist / 1000000)) if ( defined $t_dist );   # 距離(m)を割る
+                 if ( ! defined $addpoint ) {
+                     $addpoint = 0;
+                 }
+              } # if
+
+              my $runway_dir = 1;   # default
 
               if ($t_direct < 90) { $runway_dir = 1; }
               if (( 90 <= $t_direct)&&( $t_direct < 180)) { $runway_dir = 2; }
@@ -1403,12 +1487,12 @@ undef $geo_points_cursole;
 
               if ( geoarea($lat,$lng) == 1 ) {
 
-              # 追跡は速度を多めに設定 50m以上離れている場合は高速モード
+              # 追跡は速度を多めに設定 30m以上離れている場合は高速モード
               if ($runway_dir == 1) {
-                 if ( $t_dist > 50 ) {
-                        $lat = $lat + rand($point_spn + 0.0001);
+                 if ( $t_dist > 30 ) {
+                        $lat = $lat + (( rand($point_spn) + 0.0001) + $addpoint);   # addpointは基本０ 条件で可算:
                         $lat = overArealat($lat);
-                        $lng = $lng + rand($point_spn + 0.0001);
+                        $lng = $lng + (( rand($point_spn) + 0.0001) + $addpoint);
                         $lng = overArealng($lng);
                     } else {
                         $lat = $lat + rand($point_spn);
@@ -1417,10 +1501,10 @@ undef $geo_points_cursole;
                         $lng = overArealng($lng);
                           }}
               if ($runway_dir == 2) {
-                 if ( $t_dist > 50 ){
-                        $lat = $lat - rand($point_spn + 0.0001);
+                 if ( $t_dist > 30 ){
+                        $lat = $lat - (( rand($point_spn) + 0.0001) + $addpoint);
                         $lat = overArealat($lat);
-                        $lng = $lng + rand($point_spn + 0.0001);
+                        $lng = $lng + (( rand($point_spn) + 0.0001) + $addpoint);
                         $lng = overArealng($lng);
                     } else {
                         $lat = $lat - rand($point_spn);
@@ -1429,10 +1513,10 @@ undef $geo_points_cursole;
                         $lng = overArealng($lng);
                           }}
               if ($runway_dir == 3) {
-                 if ( $t_dist > 50 ){
-                        $lat = $lat - rand($point_spn + 0.0001);
+                 if ( $t_dist > 30 ){
+                        $lat = $lat - (( rand($point_spn) + 0.0001) + $addpoint);
                         $lat = overArealat($lat);
-                        $lng = $lng - rand($point_spn + 0.0001);
+                        $lng = $lng - (( rand($point_spn) + 0.0001) + $addpoint);
                         $lng = overArealng($lng);
                     } else {
                         $lat = $lat - rand($point_spn);
@@ -1441,10 +1525,10 @@ undef $geo_points_cursole;
                         $lng = overArealng($lng);
                           }}
               if ($runway_dir == 4) {
-                 if ( $t_dist > 50 ){
-                        $lat = $lat + rand($point_spn + 0.0001);
+                 if ( $t_dist > 30 ){
+                        $lat = $lat + (( rand($point_spn) + 0.0001) + $addpoint);
                         $lat = overArealat($lat);
-                        $lng = $lng - rand($point_spn + 0.0001);
+                        $lng = $lng - (( rand($point_spn) + 0.0001) + $addpoint);
                         $lng = overArealng($lng);
                     } else {
                         $lat = $lat + rand($point_spn);
@@ -1466,11 +1550,32 @@ undef $geo_points_cursole;
 
               } # geoarea if
 
+              $addpoint = 0;   # 初期化:
+
                 # 補正
                 d_correction($npcuser_stat,$rundirect,@pointlist);
 
-              # 20m以下に近づくとモードを変更
-              if ($t_dist < 20 ) {
+              # 5m以下に近づくとモードを変更
+              if ($t_dist < 5 ) {
+
+              # NPCがUSERに近づいた場合にカウントダウンをする  t_objとnpcuser_stat->{target}から算出
+              # targetがUSERの場合
+                if ( $t_obj->{category} eq "USER" ) {
+                                # 履歴を読んでカウントダウンする
+                                my $memcountobj = $membercount->find_one_and_delete({'userid'=>"$npcuser_stat->{target}"});
+                                my $pcnt = 0;
+                                   $pcnt = $memcountobj->{count} if ($memcountobj ne 'null');
+                                   $pcnt = --$pcnt;
+                                   $memcountobj->{count} = $pcnt;
+                                   $memcountobj->{userid} = $npcuser_stat->{target};
+                                   delete $memcountobj->{_id};
+                                   $membercount->insert_one($memcountobj);
+      
+                                #ランキング処理
+                                $redis->zadd('gscore', "$pcnt", "$t_obj->{email}");
+                                Loging("TARGET: $t_obj->{name} count down... for $npcuser_stat->{name}");
+                 }
+
                  $npcuser_stat->{chasecnt} = ++$npcuser_stat->{chasecnt};
                  $npcuser_stat->{status} = "round"; 
                  $target = "";
@@ -1500,7 +1605,7 @@ undef $geo_points_cursole;
                         next;
                   }
 
-              # 確立で諦める
+              # 確率で諦める
               if (($npcuser_stat->{status} eq "chase" ) && ( int(rand(100)) == $npcuser_stat->{chasecnt} )) {
 
                  # randomモードへ変更
@@ -1578,9 +1683,9 @@ undef $geo_points_cursole;
                 } # if target="" chk_targets != -1
 
             # trapeventの設置
-             if ( int(rand(100)) > 50 ){ 
+             if ( int(rand(1000)) > 998 ){ 
 
-                 Loging("Trapeventの設置");
+                 Loging("Trapeventの設置 $npcuser_stat->{name}");
                  my $evobj_stat = {
                              location => {
                                             type => "Point",
@@ -1724,8 +1829,8 @@ undef $geo_points_cursole;
                         undef $txtmsg;
                         next;
 
-              # 3000m以上に離れるとモードを変更
-              } elsif (($t_dist > 3000 ) && ($#chk_targets > 20)) {
+              # 1000m以上に離れるとモードを変更
+              } elsif (($t_dist > 1000 ) && ($#chk_targets > 20)) {
                  $npcuser_stat->{status} = "random"; 
                  $target = "";
                  $npcuser_stat->{target} = "";
@@ -1757,6 +1862,12 @@ undef $geo_points_cursole;
                      #自分をリストから除外する
                      for my $i (@$targetlist){
                          if ( $i->{userid} eq $npcuser_stat->{userid}){
+                         next;
+                         }
+                         if ( $i->{category} eq "USER" ) {
+                             for ( my $j=1; $j<=3 ; $j++ ){
+                                 push(@$targets,$i);    # userを増やす
+                             }
                          next;
                          }
                          push(@$targets,$i);
@@ -1794,6 +1905,7 @@ undef $geo_points_cursole;
                  $chatobj->{chat} = $txtmsg;
               #   writechatobj($npcuser_stat);
                  undef $txtmsg;
+                 next;
                  }
 
               my $deb_obj = to_json($t_obj); 
@@ -1828,11 +1940,11 @@ undef $geo_points_cursole;
 
               # 右回りプラス方向
               if ( $round_dire == 1 ) {
-                  $t_direct = $t_direct + 90;
+                  $t_direct = $t_direct + 45;
                   if ( $t_direct > 360 ) { $t_direct = $t_direct - 360; }
               } else {
                   # 左回りマイナス方向
-                  $t_direct = $t_direct - 90;
+                  $t_direct = $t_direct - 45;
                   if ( $t_direct < 0 ) { $t_direct = $t_direct + 360 ;}
                 }
                 $rundirect = $t_direct;
@@ -1846,29 +1958,34 @@ undef $geo_points_cursole;
 
               if ( geoarea($lat,$lng) == 1 ) {
 
+              my $addpoint = $t_dist / 1000000 if ( defined $t_dist );   # 距離(m)を割る
+                 if ( ! defined $addpoint ) {
+                     $addpoint = 0.0005;
+                 }
+
               # 周回は速度を上乗せ
               if ($runway_dir == 1) {
-                        $lat = $lat + rand($point_spn+0.0003);
+                        $lat = $lat + rand($point_spn + $addpoint);
                         $lat = overArealat($lat);
-                        $lng = $lng + rand($point_spn+0.0003);
+                        $lng = $lng + rand($point_spn + $addpoint);
                         $lng = overArealng($lng);
                           }
               if ($runway_dir == 2) {
-                        $lat = $lat - rand($point_spn+0.0003);
+                        $lat = $lat - rand($point_spn + $addpoint);
                         $lat = overArealat($lat);
-                        $lng = $lng + rand($point_spn+0.0003);
+                        $lng = $lng + rand($point_spn + $addpoint);
                         $lng = overArealng($lng);
                           }
               if ($runway_dir == 3) {
-                        $lat = $lat - rand($point_spn+0.0003);
+                        $lat = $lat - rand($point_spn + $addpoint);
                         $lat = overArealat($lat);
-                        $lng = $lng - rand($point_spn+0.0003);
+                        $lng = $lng - rand($point_spn + $addpoint);
                         $lng = overArealng($lng);
                           }
               if ($runway_dir == 4) {
-                        $lat = $lat + rand($point_spn+0.0003);
+                        $lat = $lat + rand($point_spn + $addpoint);
                         $lat = overArealat($lat);
-                        $lng = $lng - rand($point_spn+0.0003);
+                        $lng = $lng - rand($point_spn + $addpoint);
                         $lng = overArealng($lng);
                           }
               } elsif ( geoarea($lat,$lng) == 2 ) {
@@ -1888,7 +2005,7 @@ undef $geo_points_cursole;
               # 補正
               d_correction($npcuser_stat,$rundirect,@pointlist);
 
-              if ( int(rand(100)) > 90 ) {
+              if ( int(rand(100)) > 95 ) {
                  $npcuser_stat->{status} = "random"; 
                  $target = "";
                  $npcuser_stat->{target} = "";
