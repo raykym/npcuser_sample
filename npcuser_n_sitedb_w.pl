@@ -89,25 +89,28 @@ my $chatname = 'WALKCHAT';
 my $attackCH = 'ATTACKCHN';
 my @chatArray = ( $attackCH ); # chatは受信させない
 
-my @keyword = ( "コンビニ",
-                "銀行",
-                "役所",
-                "駅",
-                "図書館",
+# 用事と休憩に分類
+my @keyword = ( [
+                "コンビニ",
+                "ファーストフード",
                 "レストラン",
+                "駅",
                 "神社",
                 "寺",
-                "病院",
-                "郵便局",
+                "橋",
+                "池",
+                "沼",
                 "公園",
-                "ファーストフード",
-                "菓子", 
                 "道の駅",
                 "遊園地",
                 "牧場",
-                "ゴルフ",
-                "消防署",
-                "警察署",
+                ],
+                [
+                "図書館",
+                "病院",
+                "郵便局",
+                "役所",
+                ],
               );
 
 my $apikey = "AIzaSyC8BavSYT3W-CNuEtMS5414s3zmtpJLPx8";
@@ -128,6 +131,7 @@ my $ghostmanid = "$ARGV[0]";
 
 my $gacclist;
 my $run_gacclist;
+my @gacclist_on;
 
 my $nullcount = 0;
 
@@ -138,7 +142,7 @@ my $s_lat = $lat;
 my $s_lng = $lng;
 my $runmode = "random";
 
-my $lifecount = 17280; # 2days    # npcinitで設定されている　　　60480; #1week /10sec count 初期設定で利用、その後gacclistで置き換えられる
+my $lifecount = 17280; # 2days/10sec    # npcinitで設定されている　　　60480; #1week /10sec count 初期設定で利用、その後gacclistで置き換えられる
 
 my $icon_url = ""; # 暫定
 my $timerecord;
@@ -214,7 +218,7 @@ sub npcinit {
         $acc->{loc}->{lat} = $lat if ( $acc->{loc}->{lat} == 0);
         $acc->{loc}->{lng} = $lng if ( $acc->{loc}->{lng} == 0);
         $acc->{rundirect} = int(rand(360)) if ( $acc->{rundirect} eq "");
-        $acc->{point_spn} = 0.0002 if ( $acc->{point_spn} eq "");
+        $acc->{point_spn} = 0.0003 if ( $acc->{point_spn} eq "");
       #  $acc->{lifecount} = 60480 if ( $acc->{lifecount} eq "");
         $acc->{lifecount} = 17280 if ( $acc->{lifecount} eq "");
         $acc->{icon_url} = iconchg($acc->{status}) if ($acc->{icon_url} eq "");
@@ -329,7 +333,7 @@ sub overArealng {
 sub spnchange {
        my $t_dist = shift;
           if ( $t_dist > 30 ) {
-               $point_spn = 0.0002;
+               $point_spn = 0.0003;
            #    Loging("point_spn: $point_spn");
              } else {
                $point_spn = 0.0001;
@@ -443,9 +447,10 @@ sub nullcheckgacc {
         }
 
 sub d_correction {
-    # rundirectへの補正を検討する   d_correction($npcuser_stat,$rundirect,@pointlist); で利用する
+    # rundirectへの補正を検討する   d_correction($npcuser_stat,@pointlist); で利用する
     # 共通変数$lat $lngへ直接補正を行う
-    my ( $npcuser_stat, $rundirect, @pointlist ) = @_;
+  #  my ( $npcuser_stat, $rundirect, @pointlist ) = @_;
+    my ($npcuser_stat,@pointlist) = @_;
 
     Loging("DEBUG: d_correction: in: $rundirect");
 
@@ -529,7 +534,7 @@ sub d_correction {
           # 補正右に45度
           $rundirect = $rundirect + 45;
           if ($rundirect > 360){
-             $rundirect = 360 - $rundirect;
+             $rundirect = $rundirect - 360;
           }
           Loging("DEBUG: d_correction: out: $rundirect");
 
@@ -546,7 +551,7 @@ sub d_correction {
 sub latlng_correction {
     # d_correction用に補正したrundirectからlat or lngのどちらに補正するか判定する
     # 45度単位で分割して補正する
-    my $rundirect = shift;
+  #  my $rundirect = shift;
 
     if ( geoarea($lat,$lng) == 1 ){
         # 東経北緯
@@ -586,56 +591,6 @@ sub latlng_correction {
 
 ##### main
 
-#get_gacclist(); # AE 以下に変更
-
-  $redis->get("GACC$ghostmanid", sub{
-                     my $result = shift;
-
-                        if ( ! defined $result) { 
-                                       @$gacclist = ();
-                                       Loging("Get Redis in result block PASSED!!!");
-                                       return;
-                           }
-                     $gacclist = from_json($result);
-                     Loging(" REDIS GET "); 
-
-                 foreach my $acc (@$gacclist){
-                       Loging("GET REDIS Check $acc->{name}");
-
-                       if ( ! grep { $_->{userid} eq $acc->{userid} } @$run_gacclist ) {
-                         push(@$run_gacclist,$acc);
-                         my $debug = to_json($acc);
-                         Loging("run_gacclist not match. ");
-                         Loging("run_gacclist add: $debug");
-                         undef $debug; 
-                         } # if grep
-                     }
-
-                     npcinit();
-
-                # 初回マーク処理
-                    foreach my $npcuser_stat (@$run_gacclist){
-                                  my $dt = DateTime->now( time_zone => 'Asia/Tokyo');
-                                  # TTLレコードを追加する。
-                                  $username = $npcuser_stat->{name}; #Logingで利用されるため、設定だけしておく
-                                  $npcuser_stat->{ttl} = DateTime->now();
-
-                                  if ( $timelineredis == 0 ) {
-                                      $timelinecoll->delete_many({"userid" => $npcuser_stat->{userid}}); # mognodb3.2 削除してから
-                                      $timelinecoll->insert_one($npcuser_stat);
-                                  } elsif ( $timelineredis == 1) {
-                                      my $npcuser_stat_json = to_json($npcuser_stat);
-                                      $redis->set("Maker$npcuser_stat->{userid}" => $npcuser_stat_json);
-                                      $redis->expire("Maker$npcuser_stat->{userid}" , 32 ); #32秒保持する
-                                      undef $npcuser_stat_json;
-                                  }
-                                  $timelinelog->insert_one($npcuser_stat);
-                                  undef $dt;
-                            } # foreach $npcuser_stat
-    });  # redis get
-
-    nullcheckgacc();
-
     my $cv = AE::cv;
     my $t = AnyEvent->timer(
             after => 10,
@@ -660,39 +615,28 @@ sub latlng_correction {
 #        print "\n";
 #        Loging("gacclist list END  --------");
 
-# redis lisner  get_gacclist!!
-  $redis->get("GACC$ghostmanid", sub{
+      $redis->get("GACCon$ghostmanid", sub{
                      my $result = shift;
-
-                        Loging("redis get start point ---------------------------------");
-
-                        if ( ! defined $result) { 
-                                       @$gacclist = ();
-                                       Loging("Get Redis in result block PASSED!!!");
+                        Loging("redis_two get start point ---------------------------------");
+                        if ( ! defined $result) {
+                                       Loging("Get Redis in result block PASSED!!! GACCon$ghostmanid");
                                        return;
                            }
-                     $gacclist = from_json($result);
-                     Loging(" REDIS GET "); 
 
-                 foreach my $acc (@$gacclist){
-                       Loging("GET REDIS Check $acc->{name}");
+                           $redis->del("GACCon$ghostmanid");
 
-                       if ( ! grep { $_->{userid} eq $acc->{userid} } @$run_gacclist ) {
-                         push(@$run_gacclist,$acc);
-                         my $debug = to_json($acc);
-                         Loging("run_gacclist not match. ");
-                         Loging("run_gacclist add: $debug");
-                         undef $debug; 
-                         } # if grep
-                     }
+                         # redisへの更新
+                            my $gacclist_add = from_json($result);
+                            Loging(" REDIS GET GACCon$ghostmanid | $result");
+                            push(@$run_gacclist,@$gacclist_add);  # 問答無用で追記する　
+                            my $run_json = to_json($run_gacclist);
+                            $redis->set("GACC$ghostmanid" => $run_json);
+                            $redis->expire("GACC$ghostmanid" , 32 ); #32秒保持する
+                            Loging("REDIS SET GACCon!!!");
+                            undef $run_json;
 
-                 #   });   # 10secの末尾に移動 全ての処理はredisのサブルーチン内で処理する
-
-  # Maker get
-  my $getMaker = $redis->keys("Maker*");
-
-     #   nullcheckgacc();  # redis subの外へ
-        npcinit();
+                        Loging("redis_two get END point ---------------------------------");
+      });   # $redis GACCon
 
      #redisで攻撃判定の受信
      # 以下redisイベント受信時の処理
@@ -774,8 +718,8 @@ sub latlng_correction {
 
                                    $membercount->insert_one($memcountobj);
 
-                                #ランキング処理
-                                $redis->zadd('gscore', "$pcnt", "$messobj->{execemail}");
+                                #ランキング処理 ghostaccはexecemailは空
+                                $redis->zadd('gscore', "$pcnt", "$messobj->{execemail}") if (defined $messobj->{execemail});
 
                                 my $txtmsg = "そして$dropacc->{name} は祓われた！";
                                    $txtmsg = encode_utf8($txtmsg);
@@ -789,8 +733,46 @@ sub latlng_correction {
                                 undef $mess;
                                 undef $memcountobj;
                   });  # redis subscribe
-               $AECV->send;
+               $AECV->send;  
                $AECV->recv;
+
+# redis lisner  get_gacclist!!
+  $redis->get("GACC$ghostmanid", sub{
+                     my $result = shift;
+
+                        Loging("redis get start point ---------------------------------");
+
+                        if ( ! defined $result) { 
+                                       @$gacclist = ();
+                                       Loging("Get Redis in result block PASSED!!!");
+                                       return;
+                           }
+                     $gacclist = from_json($result) if ( defined $result );
+                     Loging(" REDIS GET GACC"); 
+
+                 foreach my $acc (@$gacclist){
+                       Loging("GET REDIS Check $acc->{name}");
+
+                       # gacclistから差分を追加する
+                       if ( ! grep { $_->{userid} eq $acc->{userid} } @$run_gacclist ) {
+                         push(@$run_gacclist,$acc);
+                         my $debug = to_json($acc);
+                         Loging("run_gacclist not match. ");
+                         Loging("run_gacclist add: $debug");
+                         undef $debug; 
+                         } # if grep
+                     }
+
+               #   undef $gacclist;   # ATTACKCHNが動かなくなる
+
+          #    });   # 10secの末尾に移動 全ての処理はredisのサブルーチン内で処理する
+
+  # Maker get
+  my $getMaker = $redis->keys("Maker*");
+
+     #   nullcheckgacc();  # redis subの外へ
+        npcinit();
+
 
  #アカウント配列のループ    ########################################
         foreach my $npcuser_stat (@$run_gacclist){
@@ -799,6 +781,7 @@ undef @pointlist;
 undef $pointlist;
 undef $targetlist;
 undef $targets;
+undef @makerlist; 
 
          # 共有変数へ、値をリンク
             $username = $npcuser_stat->{name};
@@ -816,7 +799,7 @@ undef $targets;
           #   Loging("LIFECOUNT: $npcuser_stat->{lifecount}");
                            $npcuser_stat->{lifecount}--; 
                            if ( $npcuser_stat->{lifecount} <= 0 ) {
-                             Loging("時間切れで終了...");
+                             Loging("Dead END... 時間切れで終了... $npcuser_stat->{name}");
 
                              my @list = @$run_gacclist;
                              for (my $i=0; $i <= $#list ; $i++){
@@ -918,7 +901,6 @@ undef $targets;
                        @pointlist = @makerlist;   # timelineredis==1の場合
                    }
 
-                undef @makerlist; # 毎回クリアされる
 
             #   my $hash = { 'pointlist' => \@pointlist }; #受信した時と同じ状況
 
@@ -1041,7 +1023,7 @@ undef $targets;
 
               $npcuser_stat->{target} = $makerlist[$spm]->{userid};
               $npcuser_stat->{status} = "chase";
-              Loging("Mode change Chase!");
+              Loging("Mode change Chase! to Tower");
               writejson($npcuser_stat);
            #   $txtmsg = "タワーに行くよ！！！";
            #   $txtmsg = encode_utf8($txtmsg);
@@ -1051,17 +1033,15 @@ undef $targets;
 
        } # if @makerlist
 
-undef $geo_points_cursole; 
-
-           # {chasecnt}が剰余0になると分裂する chasecntが0は除外する 連続しないために10%の確率を付与する
-           if ( ($npcuser_stat->{chasecnt} % 100 == 0) && ($npcuser_stat->{chasecnt} != 0) && ( int(rand(1000)) <= 100 ) ) {
+           # {chasecnt}が剰余0になると分裂する chasecntが0は除外する 連続しないために5%の確率を付与する
+           if ( ($npcuser_stat->{chasecnt} % 100 == 0) && ($npcuser_stat->{chasecnt} != 0) && ( int(rand(1000)) <= 50 ) ) {
               $ua->post("https://$server/ghostman/gaccput" => form => { c => "1", lat => "$lat", lng => "$lng" });
               Loging("SET UNIT ADD!!!!");
               $txtmsg = "分裂するよ！！！";
               $txtmsg = encode_utf8($txtmsg);
               $chatobj->{chat} = $txtmsg;
               writechatobj($npcuser_stat);
-              $npcuser_stat->{chasecnt} = 0 if ( $npcuser_stat->{chasecnt} == 1000);  # 1000でリセット
+              $npcuser_stat->{chasecnt} = 0 if ( $npcuser_stat->{chasecnt} >= 1000);  # 1000でリセット
               undef $txtmsg;
            }
 
@@ -1104,8 +1084,7 @@ undef $geo_points_cursole;
 
     # モード別の処理の前にユーザーを判別して追跡か逃走か判別する処理を加える
     # 追跡か逃走かの判別をどこで行うか検討が必要
-    # ユーザーを追跡するのか、自発行動を続けるのか判定が必要
-    # randomモードでなくても、確率でユーザー追跡にモード変更する
+    # ターンの初めに、USERを:chaseする:ghostが居るかを判定して、mode変更を行う。
 
     my $skipflg = 0;   # targetがmakerの場合を判定する
     if ( $npcuser_stat->{status} eq 'chase' ) {
@@ -1117,14 +1096,52 @@ undef $geo_points_cursole;
          }
     }  # if chase     
 
-    if ( $skipflg == 0 ) {   # makerをtargetしている場合はパスする
-    if ( $npcuser_stat->{status} ne "search" ) {    # searchはパスする
-    if ( $npcuser_stat->{status} ne "round" ) {    # roundはパスする
-    if ( $npcuser_stat->{status} ne "chase" ) {    # chaseはパスする
 
+    # tower優先処理では以下の処理はパスする。
+    if ( $skipflg == 0 ) {   # makerをtargetしている場合はパスする
+
+    # ghostが誰もUSERを追尾していないか判定する
+    my $utarget_chk = 0;
+    my @usercnt = ();
+    my @utargetchk = ();
+
+    for my $i (@$targetlist){ 
+        if ( $i->{category} ne "USER" ){
+            next;
+        }
+        push(@usercnt,$i);
+
+        my @utarget = (); # USERをchaseターゲットしているghost
+        for my $j (@$targetlist){
+            if (( $j->{target} eq $i->{userid} ) && ( $j->{status} eq "chase")) {
+               push(@utarget,$j); 
+            }
+        } # for j
+
+        push(@utargetchk,\@utarget) if (@utarget);  # USER毎にghostがターゲットしているリスト 空は追加しない:
+    } # for i
+
+    if (@utargetchk){
+        if ($#utargetchk == $#usercnt ){
+            # USER数とtargetリストが一致していれば、少なくとghostは追跡している
+            $utarget_chk = 1;
+            Loging("DEBUG: enough ghost chase. $npcuser_stat->{name}");
+
+            for my $i (@utargetchk){
+                for my $j (@$i){
+                    Loging("DEBUG: TARGET CHK: $j->{name} | TARGET: $j->{target}");
+                }
+            } # for
+        } # if
+
+    } else {
+        $utarget_chk = 0; # USERがtargetされていない
+        Loging("DEBUG: not enough ghost chase. Change mode $npcuser_stat->{name}");
+    }
+
+    if ( $utarget_chk == 0 ) {   # USERがtargetされていない
         for my $i (@$targetlist){
             if (($i->{category} eq "USER" ) && ( int(rand(100)) > 50 )) {
-
               my @s_p = NESW($lng, $lat);
               my @t_p = NESW($i->{loc}->{lng}, $i->{loc}->{lat});
               my $t_dist = great_circle_distance(@s_p,@t_p,6378140);
@@ -1153,15 +1170,12 @@ undef $geo_points_cursole;
                 }
             } # if 
         } # for
-
-    } # if not chase
-    } # if not round
-    } # if not search
+        } # if utarget_chk
     } # if skipflg
 
-# 6時間に１回　search:モードに変更する
-    if ( $npcuser_stat->{lifecount} % 2160 == 0 ) {
-         Loging("Change mode search.... for 6hours");
+# 2時間に１回　search:モードに変更する
+    if ( $npcuser_stat->{lifecount} % 720 == 0 ) {
+         Loging("Change mode search.... for 2hours");
          $npcuser_stat->{status} = "search";
     }
 
@@ -1259,7 +1273,7 @@ undef $geo_points_cursole;
                 } # geoarea if
 
                 # 補正
-                d_correction($npcuser_stat,$rundirect,@pointlist);
+                d_correction($npcuser_stat,@pointlist);
 
                 # モード変更チェック 
 
@@ -1395,20 +1409,8 @@ undef $geo_points_cursole;
              my @chk_targets = @$targets;
              Loging("DEBUG: Chase Targets $#chk_targets ");
 
-             # USERの確率を増やす
-             my @uptargets = ();
-             my @targetup = ();
-             for my $i (@$targets){
-                 if ( $i->{category} eq "USER" ){
-                     push(@uptargets,$i);
-                 }
-             }
-             push(@targetup,@uptargets);
-             push(@targetup,@$targets);
-             push(@targetup,@uptargets);
-
              if (($target eq "")&&($#chk_targets > 0)) {
-                     my @t_list = @targetup; 
+                     my @t_list = @$targets; 
                      my $lc = $#t_list;
                      my $tnum = int(rand($lc));
                      $target = $t_list[$tnum]->{userid};
@@ -1467,12 +1469,13 @@ undef $geo_points_cursole;
 
               my $addpoint = 0;
 
-              my $directchk;
+              my $directchk = 180;  # 初期値は大きく
 
                   $directchk = abs ( $t_direct - $t_obj->{rundirect}) ;
               #進行方向が同じ場合には、 追い越す:
-              if (( $directchk < 20 ) && ($t_dist < 400 )){
-                 $addpoint = (2 * ( $t_dist / 1000000)) if ( defined $t_dist );   # 距離(m)を割る
+              if (( $directchk < 45 ) && ($t_dist < 400 )){
+                 $addpoint = (2 * ( $t_dist / 500000)) if ( defined $t_dist );   # 距離(m)を割る
+                 Loging("DEBUG: addpoint: $addpoint $npcuser_stat->{name} ");
                  if ( ! defined $addpoint ) {
                      $addpoint = 0;
                  }
@@ -1553,7 +1556,7 @@ undef $geo_points_cursole;
               $addpoint = 0;   # 初期化:
 
                 # 補正
-                d_correction($npcuser_stat,$rundirect,@pointlist);
+                d_correction($npcuser_stat,@pointlist);
 
               # 5m以下に近づくとモードを変更
               if ($t_dist < 5 ) {
@@ -1574,6 +1577,15 @@ undef $geo_points_cursole;
                                 #ランキング処理
                                 $redis->zadd('gscore', "$pcnt", "$t_obj->{email}");
                                 Loging("TARGET: $t_obj->{name} count down... for $npcuser_stat->{name}");
+
+                 } elsif ( $t_obj->{category} eq "NPC" ){
+                     # NPC to NPC
+                     my $hit_param = { to => $t_obj->{userid}, execute => $npcuser_stat->{userid} , execemail => "" }; #ghostaccは空にする
+                     my $hitjson = to_json($hit_param);
+                     $redis->publish( $attackCH , $hitjson );    
+                     Loging("DEBUG: execute: $npcuser_stat->{name} to: $t_obj->{name}");
+                     undef $hit_param;
+                     undef $hitjson;
                  }
 
                  $npcuser_stat->{chasecnt} = ++$npcuser_stat->{chasecnt};
@@ -1814,7 +1826,7 @@ undef $geo_points_cursole;
               } # geoarea if
 
               # 補正
-              d_correction($npcuser_stat,$rundirect,@pointlist);
+              d_correction($npcuser_stat,@pointlist);
 
               #ターゲットが規定以下の場合は
               if (($#chk_targets < 20) && (int(rand(50) > 45))) {
@@ -1947,7 +1959,7 @@ undef $geo_points_cursole;
                   $t_direct = $t_direct - 45;
                   if ( $t_direct < 0 ) { $t_direct = $t_direct + 360 ;}
                 }
-                $rundirect = $t_direct;
+              $rundirect = $t_direct;
 
               my $runway_dir = 1;
 
@@ -1956,13 +1968,12 @@ undef $geo_points_cursole;
               if (( 180 <= $t_direct)&&( $t_direct < 270 )) { $runway_dir = 3; }
               if (( 270 <= $t_direct)&&( $t_direct < 360 )) { $runway_dir = 4; }
 
-              if ( geoarea($lat,$lng) == 1 ) {
-
-              my $addpoint = $t_dist / 1000000 if ( defined $t_dist );   # 距離(m)を割る
+              my $addpoint =  $t_dist / 500000 if ( defined $t_dist );   # 距離(m)を割る
                  if ( ! defined $addpoint ) {
-                     $addpoint = 0.0005;
+                     $addpoint = 0.001;
                  }
 
+              if ( geoarea($lat,$lng) == 1 ) {
               # 周回は速度を上乗せ
               if ($runway_dir == 1) {
                         $lat = $lat + rand($point_spn + $addpoint);
@@ -2002,8 +2013,10 @@ undef $geo_points_cursole;
 
               } # geoarea if
 
+              $addpoint = 0; # 初期化
+
               # 補正
-              d_correction($npcuser_stat,$rundirect,@pointlist);
+              d_correction($npcuser_stat,@pointlist);
 
               if ( int(rand(100)) > 95 ) {
                  $npcuser_stat->{status} = "random"; 
@@ -2061,8 +2074,11 @@ undef $geo_points_cursole;
 
                if ($npcuser_stat->{place}->{name} eq "") {
 
-                   my $selnum = int(rand($#keyword));
-                   my $keywd = $keyword[$selnum];
+                   my $sel = int(rand(1));    # @keywordは2次元で　０，１を選ぶ
+                   my @tmp = @{$keyword[$sel]};
+
+                   my $selnum = int(rand($#tmp));
+                   my $keywd = $keyword[$sel][$selnum];
                    Loging("DEBUG: $selnum : $keywd");
 
                   # target select
@@ -2164,7 +2180,7 @@ undef $geo_points_cursole;
                 } # geoarea if
 
                 # 補正
-                d_correction($npcuser_stat,$rundirect,@pointlist);
+                d_correction($npcuser_stat,@pointlist);
 
                 my @s_p = NESW($lng, $lat);
                 my @t_p = NESW($npcuser_stat->{place}->{lng}, $npcuser_stat->{place}->{lat});
@@ -2176,8 +2192,8 @@ undef $geo_points_cursole;
                 spnchange($t_dist);
 
                if ( $t_dist < 5 ) {
-                   $point_spn = 0.0002;  #元に戻す
-                   $npcuser_stat->{point_spn} = 0.0002;
+                   $point_spn = 0.0003;  #元に戻す
+                   $npcuser_stat->{point_spn} = 0.0003;
                    $npcuser_stat->{chasecnt} = ++$npcuser_stat->{chasecnt};   # searchの完了もカウントアップとする
                    $npcuser_stat->{status} = "random";
                    $npcuser_stat->{place}->{name} = "";
@@ -2223,9 +2239,11 @@ undef $geo_points_cursole;
 
         Loging("redis get end point ---------------------------------");
 
-      });  # redis sub
+     });  # redis sub
 
     nullcheckgacc();
+
+ #   undef $gacclist;   # 最後に消す  ...プロセスが終了しない。
 
 #   my  $psize = total_size(\%main::);
 #   Loging("main: $psize");
