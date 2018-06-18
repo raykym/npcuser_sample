@@ -18,6 +18,7 @@ use Mojo::JSON qw(encode_json decode_json from_json to_json);
 use DateTime;
 use Math::Trig qw(great_circle_distance rad2deg deg2rad pi);
 use Clone qw(clone);
+use Mojo::IOLoop;
 use Mojo::IOLoop::Delay;
 use EV;
 use AnyEvent;
@@ -64,9 +65,9 @@ if ( $#ARGV < 1 ) {
 my $ua = Mojo::UserAgent->new;
 my $cookie_jar = $ua->cookie_jar;
    $ua = $ua->cookie_jar(Mojo::UserAgent::CookieJar->new);
-   $ua->max_connections(1);
-   $ua->connect_timeout(1);
-   $ua->inactivity_timeout(60);
+   # $ua->max_connections(1);
+   $ua->connect_timeout(10);
+   $ua->inactivity_timeout(12);
 
 my $email = "$ARGV[0]";
 my $emailpass = "$ARGV[1]";
@@ -481,6 +482,14 @@ my $oncerun = "true";
 	      # $tx->finish;  # 受信出来ないから
 #        });
 #      }
+#
+
+	      # INT来るまでループ
+my $sigCV = AE::cv;
+my $signal = AnyEvent->signal( signal => 'INT' ,
+	                       cb => sub {
+				            exit;
+					 });
 
 
 #ループ処理 
@@ -488,6 +497,8 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
  my $t = AnyEvent->timer( after => 0,
                           interval => 10,
                              cb => sub {
+
+#Mojo::IOLoop->recurring( 10 => sub {
                            
                            $lifecount--;  
                            if ( $lifecount == 0 ) {
@@ -496,13 +507,14 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
                              }
   Loging("life count: $lifecount ");
 
+
+
 # websocketでの位置情報送受信
   $ua->websocket("wss://$server/walkworld" =>  sub {
 
     my ($ua,$tx) = @_;
 
     $id = sprintf "%s", $tx->connection;
-
     Loging("websocket connection $id");
 
     $tx->on(json => sub {
@@ -580,7 +592,8 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
          }
 
          if ( $#gaccunit < $unitcnt ){
-             $ua->post("https://$server/ghostman/gaccput" => form => { c => "1", lat => "$lat", lng => "$lng" });
+		 #  $ua->post("https://$server/ghostman/gaccput" => form => { c => "1", lat => "$lat", lng => "$lng" });
+             $ua->post("https://$server/ghostman/gaccputminion" => form => { c => "1", lat => "$lat", lng => "$lng" });
              Loging("SET UNIT ADD!!!!"); 
          } 
 
@@ -636,13 +649,12 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
               last;
               } # if
         }
-
-	$tx->finish;
         }); #on json
     
     $tx->on(finish => sub {
        my ($tx, $code, $reason) = @_;
        Loging("WebSocket closed with status $code. $username $id");
+       $cv->send; # cvループを抜けて再接続
     #   exit;
     });
 
@@ -685,6 +697,20 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
         Loging("Change mode search.... for 2hours : $lifecount");
         $npcuser_stat->{status} = "search";
    }
+
+    # 共通処理の最後にウェイトを設定する
+    # タイマーでディレイしてからクローズする  sleep 8ではブロックするが、これなら受信は行われる
+    my $delay = Mojo::IOLoop::Delay->new;
+       $delay->steps(
+             sub {
+                my $delay = shift;
+                Mojo::IOLoop->timer(8 => $delay->begin);
+                },
+             sub {
+                my ($delay,@param) = @_;
+                $tx->finish;
+                })->wait;
+
 
              # テスト用　位置保持
              if ( $npcuser_stat->{status} eq "STAY") {
@@ -1547,8 +1573,14 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
           #    return;
 
           sendjson($tx);   # 念のため
-          }); #  ua
+
+    }); # ua
+    Mojo::IOLoop->start unless Mojo::IOLoop->is_running;
 
    }); # timer 
 
-$cv->recv;
+
+#   Mojo::IOLoop->start unless Mojo::IOLoop->is_running;
+  $cv->recv;
+
+$sigCV->recv;   # signal INT

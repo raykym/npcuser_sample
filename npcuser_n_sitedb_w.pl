@@ -119,6 +119,9 @@ my $radi = 3000; #検索レンジ
 my $ua = Mojo::UserAgent->new;
 my $cookie_jar = $ua->cookie_jar;
    $ua = $ua->cookie_jar(Mojo::UserAgent::CookieJar->new);
+   #$ua->max_connections(1);
+   $ua->connect_timeout(5);
+   $ua->inactivity_timeout(7);
 
 my $username = "";
 my $userid = "";
@@ -1294,12 +1297,11 @@ undef @makerlist;
                    if (int(rand(50)) > 48) {
 
                    ####     if ($#chk_targets == -1) { next; } #pass  searchではtargetは不要
-
-                        $npcuser_stat->{status} = "search";
-                        Loging("Mode change Search!");
+		       $npcuser_stat->{status} = "search";
+		        Loging("Mode change Search!");
                         writejson($npcuser_stat);
 
-                        my $txtmsg  = "検索モードになったよ！";
+		        my $txtmsg  = "検索モードになったよ！";
                            $txtmsg = encode_utf8($txtmsg);
                         $chatobj->{chat} = $txtmsg;
                       #  writechatobj($npcuser_stat);
@@ -2057,7 +2059,7 @@ undef @makerlist;
           } # round
 
              # 検索モード
-             if ( $npcuser_stat->{status} eq "search" ){
+             if ( $npcuser_stat->{status} eq "search" ){  
 
                 #周囲にユニットが在るか確認
                      @$targets = ();
