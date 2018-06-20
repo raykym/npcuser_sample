@@ -602,23 +602,32 @@ sub latlng_correction {
 
         Loging("------------------------------LOOP START-----------------------------------");
 
-#        Loging("run_gacclist name list --------");
-#        foreach my $i (@$run_gacclist){
-#           print "$i->{name}";
-#           print " ";
-#        }
-#        print "\n";
-#        Loging("run_gacclist list END  --------");
-#
-#        Loging("gacclist name list --------");
-#        foreach my $i (@$gacclist){
-#           print "$i->{name}";
-#           print " ";
-#        }
-#        print "\n";
-#        Loging("gacclist list END  --------");
 
-      $redis->get("GACCon$ghostmanid", sub{
+	#     $redis->get("GACCon$ghostmanid", sub{
+	#             my $result = shift;
+	#                Loging("redis_two get start point ---------------------------------");
+	#                if ( ! defined $result) {
+	#                               Loging("Get Redis in result block PASSED!!! GACCon$ghostmanid");
+	#                               return;
+	#                   }
+
+	#                  $redis->del("GACCon$ghostmanid");
+
+                         # redisへの更新
+	#                    my $gacclist_add = from_json($result);
+	#                    Loging(" REDIS GET GACCon$ghostmanid | $result");
+	#                    push(@$run_gacclist,@$gacclist_add);  # 問答無用で追記する　
+	#                    my $run_json = to_json($run_gacclist);
+	#                    $redis->set("GACC$ghostmanid" => $run_json);
+	#                    $redis->expire("GACC$ghostmanid" , 32 ); #32秒保持する
+	#                    Loging("REDIS SET GACCon!!!");
+	#                    undef $run_json;
+
+	#               Loging("redis_two get END point ---------------------------------");
+	#  });   # $redis GACCon
+
+      # hashから取得する
+      $redis->hvals("GACCon$ghostmanid", sub{
                      my $result = shift;
                         Loging("redis_two get start point ---------------------------------");
                         if ( ! defined $result) {
@@ -628,14 +637,18 @@ sub latlng_correction {
 
                            $redis->del("GACCon$ghostmanid");
 
-                         # redisへの更新
-                            my $gacclist_add = from_json($result);
-                            Loging(" REDIS GET GACCon$ghostmanid | $result");
+                         # redisへの更新  配列にテキストが入っている
+                           for my $i (@$result){
+
+                            my $gacclist_add = from_json($i);
+                            Loging(" REDIS GET GACCon$ghostmanid | $i");
                             push(@$run_gacclist,@$gacclist_add);  # 問答無用で追記する　
+                           }
+
                             my $run_json = to_json($run_gacclist);
                             $redis->set("GACC$ghostmanid" => $run_json);
                             $redis->expire("GACC$ghostmanid" , 32 ); #32秒保持する
-                            Loging("REDIS SET GACCon!!!");
+                            Loging("REDIS SET GACC!!!");
                             undef $run_json;
 
                         Loging("redis_two get END point ---------------------------------");
@@ -766,8 +779,6 @@ sub latlng_correction {
                          } # if grep
                      }
 
-               #   undef $gacclist;   # ATTACKCHNが動かなくなる
-
           #    });   # 10secの末尾に移動 全ての処理はredisのサブルーチン内で処理する
 
   # Maker get
@@ -793,11 +804,6 @@ undef @makerlist;
             $lat = $npcuser_stat->{loc}->{lat};
             $lng = $npcuser_stat->{loc}->{lng}; 
             $point_spn = $npcuser_stat->{point_spn};
-
-          #  my $debug = to_json($npcuser_stat);
-          #  Loging("------LOOP npcuser_stat: $debug");
-          #  undef $debug;
-
 
           #   Loging("LIFECOUNT: $npcuser_stat->{lifecount}");
                            $npcuser_stat->{lifecount}--; 
@@ -904,9 +910,6 @@ undef @makerlist;
                        @pointlist = @makerlist;   # timelineredis==1の場合
                    }
 
-
-            #   my $hash = { 'pointlist' => \@pointlist }; #受信した時と同じ状況
-
                # trapevent処理
                # trapeventのヒット判定
                my $trapmember_cursole = $trapmemberlist->query({ location => {
@@ -920,9 +923,6 @@ undef @makerlist;
 
                my @trapevents = $trapmember_cursole->all;
 
-          #     my $debug = to_json(@trapevents);
-          #     Loging("DEBUG: trapevents: $debug");
-          #     undef $debug;
 
                if ( $#trapevents != -1 ){
                    Loging("TRAP on Event!!!!!!!");
@@ -1176,9 +1176,9 @@ undef @makerlist;
         } # if utarget_chk
     } # if skipflg
 
-# 2時間に１回　search:モードに変更する
-    if ( $npcuser_stat->{lifecount} % 720 == 0 ) {
-         Loging("Change mode search.... for 2hours");
+# 6時間に１回　search:モードに変更する
+    if ( $npcuser_stat->{lifecount} % 2160 == 0 ) {
+         Loging("Change mode search.... for 6hours");
          $npcuser_stat->{status} = "search";
     }
 
@@ -1294,7 +1294,7 @@ undef @makerlist;
                     }
 
                    # 乱数によるモード変更
-                   if (int(rand(50)) > 48) {
+                   if (int(rand(1000)) > 998) {
 
                    ####     if ($#chk_targets == -1) { next; } #pass  searchではtargetは不要
 		       $npcuser_stat->{status} = "search";
@@ -1349,44 +1349,6 @@ undef @makerlist;
                         undef $txtmsg;
                         next;
                     }
-
-       #         #スタート地点からの距離判定
-       #         # radianに変換
-       #         my @s_p = NESW($lng, $lat);
-       #         my @t_p = NESW($s_lng, $s_lat);
-       #         my $t_dist = great_circle_distance(@s_p,@t_p,6378140);
-       #         undef @s_p;
-       #         undef @t_p;
-       #
-       #         Loging("mode Random: $t_dist");
-       #
-       #         spnchange($t_dist);
-       #
-       #         # スタート地点から2km離れて、他に稼働するものがあれば、
-       #         if ($t_dist > 2000 ){
-       #
-       #              @$targets = ();
-       #              #自分をリストから除外する
-       #              for my $i (@$targetlist){
-       #                  if ( $i->{userid} eq $npcuser_stat->{userid}){
-       #                  next;
-       #                  }
-       #                  push(@$targets,$i);
-       #              }
-       #
-       #              my @t_list = @$targets;
-       #              if ( $#t_list > 2 ){
-       #                 $npcuser_stat->{status} = "chase";
-       #                 Loging("Mode change Chase!");
-       #                 my $txtmsg  = "追跡モードになったよ！";
-       #                    $txtmsg = encode_utf8($txtmsg);
-       #                 $chatobj->{chat} = $txtmsg;
-       #              #   writechatobj($npcuser_stat);
-       #                 undef @t_list;
-       #                 next;
-       #                 }
-       #              undef @t_list;
-       #         }  # t_dist > 2000 
 
               writejson($npcuser_stat);
               undef @chk_targets; 
@@ -2244,27 +2206,6 @@ undef @makerlist;
      });  # redis sub
 
     nullcheckgacc();
-
- #   undef $gacclist;   # 最後に消す  ...プロセスが終了しない。
-
-#   my  $psize = total_size(\%main::);
-#   Loging("main: $psize");
-#    Dump(\%main::);
-#Loging("-----find-----");
-#find_cycle($timelinecoll);
-#find_cycle($timelinelog);
-
-#Loging("gacclist check");
-#Dump($gacclist);
-#Loging("run_gacclist check");
-#Dump($run_gacclist);
-#Loging("chatobj check");
-#Dump($chatobj);
-#Loging("username check");
-#Dump($username);
-#Loging("rundirect check");
-#Dump($rundirect);
-
 
         Loging("---------------------LOOP END-----------------------------------");
     #   $cv->send;  # never end loop

@@ -681,10 +681,10 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
           } # if
 
 # 2時間に１回　search:モードに変更する
-   if ( $lifecount % 720 == 0 ) {
-        Loging("Change mode search.... for 2hours : $lifecount");
-        $npcuser_stat->{status} = "search";
-   }
+#   if ( $lifecount % 720 == 0 ) {
+#        Loging("Change mode search.... for 2hours : $lifecount");
+#        $npcuser_stat->{status} = "search";
+#   }
 
              # テスト用　位置保持
              if ( $npcuser_stat->{status} eq "STAY") {

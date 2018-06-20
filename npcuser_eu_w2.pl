@@ -693,10 +693,10 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
           } # if
 
 # 2時間に１回　search:モードに変更する
-   if ( $lifecount % 720 == 0 ) {
-        Loging("Change mode search.... for 2hours : $lifecount");
-        $npcuser_stat->{status} = "search";
-   }
+#   if ( $lifecount % 720 == 0 ) {
+#        Loging("Change mode search.... for 2hours : $lifecount");
+#        $npcuser_stat->{status} = "search";
+#   }
 
     # 共通処理の最後にウェイトを設定する
     # タイマーでディレイしてからクローズする  sleep 8ではブロックするが、これなら受信は行われる
