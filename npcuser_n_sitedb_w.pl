@@ -8,13 +8,16 @@
 # Mojo::Redis2のメモリーリークが問題なので、Redis、AnyEvent::Redisに置き換え
 #
 # 緯度経度の限界処理追加
+#
+# search機能を停止2018/09/13
+#
 # usage
 # npcuser_n_sitedb.pl [ghostmanid]
 
 my $timelineredis = 0; # 0: mongodb  1: redis
 
-my $mongoserver = "10.140.0.8";
-my $redisserver = "10.140.0.8";
+my $mongoserver = "10.140.0.4";
+my $redisserver = "10.140.0.4";
 my $server = "westwind.backbone.site";   # DNS lookup ghostman access
 
 use strict;
@@ -145,7 +148,7 @@ my $s_lat = $lat;
 my $s_lng = $lng;
 my $runmode = "random";
 
-my $lifecount = 17280; # 2days/10sec    # npcinitで設定されている　　　60480; #1week /10sec count 初期設定で利用、その後gacclistで置き換えられる
+my $lifecount = 34560; # 2days/5sec    # npcinitで設定されている　　　60480; #1week /10sec count 初期設定で利用、その後gacclistで置き換えられる
 
 my $icon_url = ""; # 暫定
 my $timerecord;
@@ -221,9 +224,9 @@ sub npcinit {
         $acc->{loc}->{lat} = $lat if ( $acc->{loc}->{lat} == 0);
         $acc->{loc}->{lng} = $lng if ( $acc->{loc}->{lng} == 0);
         $acc->{rundirect} = int(rand(360)) if ( $acc->{rundirect} eq "");
-        $acc->{point_spn} = 0.0003 if ( $acc->{point_spn} eq "");
-      #  $acc->{lifecount} = 60480 if ( $acc->{lifecount} eq "");
-        $acc->{lifecount} = 17280 if ( $acc->{lifecount} eq "");
+        $acc->{point_spn} = 0.00015 if ( $acc->{point_spn} eq "");
+        $acc->{lifecount} = 60480 if ( $acc->{lifecount} eq "");
+      #  $acc->{lifecount} = 34560 if ( $acc->{lifecount} eq "");
         $acc->{icon_url} = iconchg($acc->{status}) if ($acc->{icon_url} eq "");
         $acc->{chasecnt} = 0 if ( ! defined $acc->{chasecnt} );
 
@@ -336,10 +339,10 @@ sub overArealng {
 sub spnchange {
        my $t_dist = shift;
           if ( $t_dist > 30 ) {
-               $point_spn = 0.0003;
+               $point_spn = 0.00015;
            #    Loging("point_spn: $point_spn");
              } else {
-               $point_spn = 0.0001;
+               $point_spn = 0.00005;
            #    Loging("point_spn: $point_spn");
              }
        undef $t_dist;
@@ -347,7 +350,7 @@ sub spnchange {
 
 sub NESW { deg2rad($_[0]), deg2rad(90 - $_[1]) }
 
-# 2点間の距離を算出 (度) 
+# 2点間の方角を算出 (度) 
 sub geoDirect {
     my ($lat1, $lng1, $lat2, $lng2) = @_;
 
@@ -417,13 +420,11 @@ sub writechatobj {
                   $chatobj->{icon_url} = $npcuser_stat->{icon_url};
                   $chatobj->{hms} = $dt->hms;
                   $chatobj->{ttl} = DateTime->now();
-               my $debmsg = to_json($chatobj);
-                  Loging("DEBUG: WRITECHAT: $debmsg");
                my $chatjson = to_json($chatobj);
+                  Loging("DEBUG: WRITECHAT: $chatjson");
                   $redis->publish( $chatname , $chatjson );
                   $walkchatcoll->insert_one($chatobj);              
 
-                  undef $debmsg;
                   undef $npcuser_stat;
                   undef $chatjson;
                   undef $dt;
@@ -596,8 +597,8 @@ sub latlng_correction {
 
     my $cv = AE::cv;
     my $t = AnyEvent->timer(
-            after => 10,
-            interval => 10,
+            after => 0,
+            interval => 5,
                cb => sub {
 
         Loging("------------------------------LOOP START-----------------------------------");
@@ -740,7 +741,25 @@ sub latlng_correction {
                                 my $txtmsg = "そして$dropacc->{name} は祓われた！";
                                    $txtmsg = encode_utf8($txtmsg);
                                 $chatobj->{chat} = $txtmsg;
-                                writechatobj($dropacc);
+				# ここはアカウントループの外側なので、writechatobjが間違った動作になる
+	                    #   writechatobj($dropacc);   
+			    #
+                                 my $dt = DateTime->now( time_zone => 'Asia/Tokyo');
+                                    $chatobj->{chat} = decode_utf8($chatobj->{chat});
+                                    $chatobj->{loc}->{lat} = $dropacc->{loc}->{lat};
+                                    $chatobj->{loc}->{lng} = $dropacc->{loc}->{lng};
+                                    $chatobj->{geometry}->{coordinates}= [ $dropacc->{loc}->{lng}, $dropacc->{loc}->{lat} ];
+                                    $chatobj->{username} = $dropacc->{name};
+                                    $chatobj->{icon_url} = $dropacc->{icon_url};
+                                    $chatobj->{hms} = $dt->hms;
+                                    $chatobj->{ttl} = DateTime->now();
+                                 my $chatjson = to_json($chatobj);
+                                    Loging("DEBUG: WRITECHAT: $chatjson");
+	                            $redis->publish( $chatname , $chatjson );
+	                        #  $walkchatcoll->insert_one($chatobj);  # どうやらここがエラーに成って、攻撃判定が無効化されるらしい           
+
+                                 undef $chatjson;
+                                 undef $dt;
 
                                 undef $txtmsg;
                                 undef $dropacc;
@@ -750,7 +769,7 @@ sub latlng_correction {
                                 undef $memcountobj;
                   });  # redis subscribe
                $AECV->send;  
-               $AECV->recv;
+	       $AECV->recv;
 
 # redis lisner  get_gacclist!!
   $redis->get("GACC$ghostmanid", sub{
@@ -1125,8 +1144,9 @@ undef @makerlist;
     } # for i
 
     if (@utargetchk){
-        if ($#utargetchk == $#usercnt ){
-            # USER数とtargetリストが一致していれば、少なくとghostは追跡している
+
+        if ($#utargetchk == $#usercnt ){ 
+            # USER数とutargetchkリストが一致していれば、少なくとghostは追跡している
             $utarget_chk = 1;
             Loging("DEBUG: enough ghost chase. $npcuser_stat->{name}");
 
@@ -1135,15 +1155,16 @@ undef @makerlist;
                     Loging("DEBUG: TARGET CHK: $j->{name} | TARGET: $j->{target}");
                 }
             } # for
-        } # if
+        }  # if
 
     } else {
         $utarget_chk = 0; # USERがtargetされていない
         Loging("DEBUG: not enough ghost chase. Change mode $npcuser_stat->{name}");
     }
 
-    if ( $utarget_chk == 0 ) {   # USERがtargetされていない
+    if (( $utarget_chk == 0 ) && ( grep {$npcuser_stat->{target} eq $_->{userid}} @usercnt )) {   # USERがtargetされていない 自分がUSERをchaseしていない
         for my $i (@$targetlist){
+
             if (($i->{category} eq "USER" ) && ( int(rand(100)) > 50 )) {
               my @s_p = NESW($lng, $lat);
               my @t_p = NESW($i->{loc}->{lng}, $i->{loc}->{lat});
@@ -1166,7 +1187,7 @@ undef @makerlist;
                      } elsif ( int(rand(100)) < 95) {
                          $npcuser_stat->{status} = "round";
                          last;
-                     } elsif ( int(rand(100)) < 99) {
+                     } elsif ( int(rand(1000)) < 0) {   #選択されない
                          $npcuser_stat->{status} = "search";
                          last;
                      }
@@ -1177,10 +1198,10 @@ undef @makerlist;
     } # if skipflg
 
 # 6時間に１回　search:モードに変更する
-    if ( $npcuser_stat->{lifecount} % 2160 == 0 ) {
-         Loging("Change mode search.... for 6hours");
-         $npcuser_stat->{status} = "search";
-    }
+#    if ( $npcuser_stat->{lifecount} % 2160 == 0 ) {
+#         Loging("Change mode search.... for 6hours");
+#         $npcuser_stat->{status} = "search";
+#    }
 
 # ここから下はnpcuser_stat->{status}で処理が分かれる
 
@@ -1293,8 +1314,8 @@ undef @makerlist;
                           next;
                     }
 
-                   # 乱数によるモード変更
-                   if (int(rand(1000)) > 998) {
+                   # 乱数によるモード変更 searchは常に無効に変更 199 -> 299
+                   if (int(rand(200)) > 299) {
 
                    ####     if ($#chk_targets == -1) { next; } #pass  searchではtargetは不要
 		       $npcuser_stat->{status} = "search";
@@ -2156,8 +2177,8 @@ undef @makerlist;
                 spnchange($t_dist);
 
                if ( $t_dist < 5 ) {
-                   $point_spn = 0.0003;  #元に戻す
-                   $npcuser_stat->{point_spn} = 0.0003;
+                   $point_spn = 0.00015;  #元に戻す
+                   $npcuser_stat->{point_spn} = 0.00015;
                    $npcuser_stat->{chasecnt} = ++$npcuser_stat->{chasecnt};   # searchの完了もカウントアップとする
                    $npcuser_stat->{status} = "random";
                    $npcuser_stat->{place}->{name} = "";
@@ -2192,7 +2213,7 @@ undef @makerlist;
              } # search
 
       } #foreach $run_gacclist   ######################################################
-      # 以上は10秒毎に実行されるアカウントループ
+      # 以上は5秒毎に実行されるアカウントループ
 
      # redis 書き込み
      my $run_json = to_json($run_gacclist);

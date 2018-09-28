@@ -580,7 +580,8 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
          }
 
          if ( $#gaccunit < $unitcnt ){
-             $ua->post("https://$server/ghostman/gaccput" => form => { c => "1", lat => "$lat", lng => "$lng" });
+		 #  $ua->post("https://$server/ghostman/gaccput" => form => { c => "1", lat => "$lat", lng => "$lng" });
+             $ua->post("https://$server/ghostman/gaccputminion" => form => { c => "1", lat => "$lat", lng => "$lng" });
              Loging("SET UNIT ADD!!!!"); 
          } 
 
@@ -798,7 +799,7 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
                      #   sendchatobj($tx);
                         return;
 
-                   }  elsif (int(rand(1000)) > 999) {
+                   }  elsif (int(rand(100)) > 99) {
                         $npcuser_stat->{status} = "search";
                         Loging("Mode change Search!");
                         sendjson($tx);
@@ -809,7 +810,7 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
 
                         return;
 
-                   } elsif (int(rand(1000)) > 999 ) {
+                   } elsif (int(rand(1000)) > 990 ) {
 
                         if ($#chk_targets == -1) { return; }
 
@@ -821,7 +822,7 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
                         $chatobj->{chat} = $txtmsg;
                      #   sendchatobj($tx);
                         return;
-                   } elsif (int(rand(1000)) > 999 ) {
+                   } elsif (int(rand(1000)) > 990 ) {
 
                         if ($#chk_targets == -1) { return; }
 

@@ -8,6 +8,7 @@
 # email passwordは必須
 # websocket1個でchatまで対応した版
 # 緯度経度の限界処理追加
+# Delayで8秒間は接続を続ける
 
 use strict;
 use warnings;
@@ -33,7 +34,7 @@ $| = 1;
 
 my $server = "westwind.backbone.site";  # dns lookup
 
-my $mongoserver = "10.140.0.8";
+my $mongoserver = "10.140.0.4";
 
 my @keyword = ( "コンビニ",
                 "銀行",
@@ -154,7 +155,7 @@ my $lifecount = 3153600; #1year /10sec count
 
 my $icon_url = ""; # 暫定
 my $timerecord;
-my $point_spn = 0.0003; # /10sec
+my $point_spn = 0.00015; # /5sec
 my $direct_reng = 90;
 my $rundirect = int(rand(360));
 
@@ -268,10 +269,10 @@ sub overArealng {
 sub spnchange {
        my $t_dist = shift;
           if ( $t_dist > 30 ) {
-               $point_spn = 0.0003;
+               $point_spn = 0.00015;
                Loging("point_spn: $point_spn");
              } else {
-               $point_spn = 0.0001;
+               $point_spn = 0.00005;
                Loging("point_spn: $point_spn");
              }
 }
@@ -495,7 +496,7 @@ my $signal = AnyEvent->signal( signal => 'INT' ,
 #ループ処理 
 my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう。 途中で終了出来ない問題が起きた
  my $t = AnyEvent->timer( after => 0,
-                          interval => 10,
+                          interval => 5,
                              cb => sub {
 
 #Mojo::IOLoop->recurring( 10 => sub {
@@ -683,7 +684,7 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
               undef $t_dist;
           }
 
-          if (@eutargets){
+          if ((@eutargets) && (int(rand(10)) > 5))  {
               for my $i (@eutargets){
                   my $hit_param = { to => $i->{userid}, target => $i->{name}, execute => $userid, execemail => $email };
                   my $debug = to_json($hit_param);
@@ -700,11 +701,12 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
 
     # 共通処理の最後にウェイトを設定する
     # タイマーでディレイしてからクローズする  sleep 8ではブロックするが、これなら受信は行われる
+    # websocketの切断時間を最小化する
     my $delay = Mojo::IOLoop::Delay->new;
        $delay->steps(
              sub {
                 my $delay = shift;
-                Mojo::IOLoop->timer(8 => $delay->begin);
+                Mojo::IOLoop->timer(3 => $delay->begin);
                 },
              sub {
                 my ($delay,@param) = @_;
@@ -811,7 +813,7 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
 
 
                 # モード変更チェック 
-                   if (int(rand(100)) > 90) {
+                   if (int(rand(500)) > 490) {
 
                         if ($#chk_targets == -1) { return; }
 
@@ -824,7 +826,7 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
                      #   sendchatobj($tx);
                         return;
 
-                   }  elsif (int(rand(1000)) > 999) {
+                   }  elsif (int(rand(1000)) > 1999) {
                         $npcuser_stat->{status} = "search";
                         Loging("Mode change Search!");
                         sendjson($tx);
@@ -835,7 +837,7 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
 
                         return;
 
-                   } elsif (int(rand(1000)) > 999 ) {
+                   } elsif (int(rand(500)) > 490 ) {
 
                         if ($#chk_targets == -1) { return; }
 
@@ -847,7 +849,7 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
                         $chatobj->{chat} = $txtmsg;
                      #   sendchatobj($tx);
                         return;
-                   } elsif (int(rand(1000)) > 999 ) {
+                   } elsif (int(rand(500)) > 490 ) {
 
                         if ($#chk_targets == -1) { return; }
 
@@ -1538,7 +1540,7 @@ my $cv = AE::cv;  # Mojo::IOLoop recurringでは判定が重複してしまう�
                 spnchange($t_dist);
 
                if ( $t_dist < 5 ) {
-                   $point_spn = 0.0003;  #元に戻す
+                   $point_spn = 0.00015;  #元に戻す
                    $npcuser_stat->{status} = "random";
                    $npcuser_stat->{place}->{name} = "";
                    $npcuser_stat->{place}->{lat} = "";
